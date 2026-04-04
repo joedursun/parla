@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duo — Welcome</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body {
+      background: var(--bg);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .onboarding {
+      max-width: 520px;
+      width: 100%;
+      padding: var(--space-xl);
+    }
+
+    .onboarding-logo {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      font-weight: 700;
+      font-size: 1.5rem;
+      color: var(--primary);
+      margin-bottom: var(--space-2xl);
+      justify-content: center;
+    }
+
+    .onboarding-logo .logo-icon {
+      width: 44px;
+      height: 44px;
+      background: var(--primary);
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 1.25rem;
+    }
+
+    .onboarding-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      padding: var(--space-2xl);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .onboarding-card h1 {
+      text-align: center;
+      margin-bottom: var(--space-xs);
+    }
+
+    .onboarding-card .subtitle {
+      text-align: center;
+      color: var(--text-secondary);
+      margin-bottom: var(--space-xl);
+      font-size: 0.9375rem;
+    }
+
+    /* Step indicators */
+    .steps {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-sm);
+      margin-bottom: var(--space-xl);
+    }
+
+    .step-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: var(--radius-full);
+      background: var(--border);
+      transition: all var(--transition);
+    }
+
+    .step-dot.active {
+      background: var(--primary);
+      width: 24px;
+    }
+
+    .step-dot.done {
+      background: var(--success);
+    }
+
+    /* Language selection grid */
+    .language-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-sm);
+      margin-bottom: var(--space-xl);
+    }
+
+    .language-option {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      padding: var(--space-md);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-lg);
+      cursor: pointer;
+      transition: all var(--transition);
+      background: var(--surface);
+    }
+
+    .language-option:hover {
+      border-color: var(--primary-light);
+      background: var(--primary-subtle);
+    }
+
+    .language-option.selected {
+      border-color: var(--primary);
+      background: var(--primary-subtle);
+    }
+
+    .language-option .flag {
+      font-size: 1.75rem;
+      line-height: 1;
+    }
+
+    .language-option .lang-name {
+      font-weight: 600;
+      font-size: 0.9375rem;
+    }
+
+    .language-option .lang-native {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+
+    /* Level selection */
+    .level-options {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+      margin-bottom: var(--space-xl);
+    }
+
+    .level-option {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-md);
+      padding: var(--space-md) var(--space-lg);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-lg);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .level-option:hover {
+      border-color: var(--primary-light);
+      background: var(--primary-subtle);
+    }
+
+    .level-option.selected {
+      border-color: var(--primary);
+      background: var(--primary-subtle);
+    }
+
+    .level-badge {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.8125rem;
+      flex-shrink: 0;
+    }
+
+    .level-badge.beginner { background: var(--success-subtle); color: var(--success); }
+    .level-badge.elementary { background: var(--accent-gold-subtle); color: var(--warning); }
+    .level-badge.intermediate { background: var(--secondary-subtle); color: var(--secondary); }
+    .level-badge.advanced { background: var(--primary-subtle); color: var(--primary); }
+
+    .level-info h4 { margin-bottom: 2px; }
+    .level-info p { font-size: 0.8125rem; color: var(--text-secondary); line-height: 1.5; }
+
+    /* Goals */
+    .goal-options {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+      margin-bottom: var(--space-xl);
+    }
+
+    .goal-option {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      padding: var(--space-md) var(--space-lg);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-lg);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .goal-option:hover {
+      border-color: var(--primary-light);
+    }
+
+    .goal-option.selected {
+      border-color: var(--primary);
+      background: var(--primary-subtle);
+    }
+
+    .goal-icon {
+      font-size: 1.5rem;
+    }
+
+    .goal-info h4 { margin-bottom: 2px; }
+    .goal-info p { font-size: 0.8125rem; color: var(--text-secondary); }
+
+    /* Actions */
+    .onboarding-actions {
+      display: flex;
+      gap: var(--space-md);
+      justify-content: space-between;
+    }
+
+    .onboarding-actions .btn {
+      flex: 1;
+    }
+
+    /* Welcome final screen */
+    .welcome-teacher {
+      text-align: center;
+      padding: var(--space-lg) 0;
+    }
+
+    .teacher-avatar {
+      width: 80px;
+      height: 80px;
+      border-radius: var(--radius-full);
+      background: linear-gradient(135deg, var(--primary), var(--primary-light));
+      margin: 0 auto var(--space-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: white;
+      box-shadow: 0 4px 20px rgba(91, 79, 196, 0.3);
+    }
+
+    .teacher-greeting {
+      font-size: 1.125rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      max-width: 380px;
+      margin: 0 auto var(--space-lg);
+    }
+  </style>
+</head>
+<body>
+  <div class="onboarding">
+    <div class="onboarding-logo">
+      <div class="logo-icon">D</div>
+      Duo
+    </div>
+
+    <!-- ====== STEP 1: Choose Language ====== -->
+    <div class="onboarding-card" id="step1">
+      <div class="steps">
+        <div class="step-dot active"></div>
+        <div class="step-dot"></div>
+        <div class="step-dot"></div>
+        <div class="step-dot"></div>
+      </div>
+
+      <h1>What would you like to learn?</h1>
+      <p class="subtitle">Choose the language you want to practice</p>
+
+      <div class="language-grid">
+        <div class="language-option selected">
+          <span class="flag">&#x1F1EA;&#x1F1F8;</span>
+          <div>
+            <div class="lang-name">Spanish</div>
+            <div class="lang-native">Espanol</div>
+          </div>
+        </div>
+        <div class="language-option">
+          <span class="flag">&#x1F1EB;&#x1F1F7;</span>
+          <div>
+            <div class="lang-name">French</div>
+            <div class="lang-native">Francais</div>
+          </div>
+        </div>
+        <div class="language-option">
+          <span class="flag">&#x1F1EF;&#x1F1F5;</span>
+          <div>
+            <div class="lang-name">Japanese</div>
+            <div class="lang-native">&#x65E5;&#x672C;&#x8A9E;</div>
+          </div>
+        </div>
+        <div class="language-option">
+          <span class="flag">&#x1F1E9;&#x1F1EA;</span>
+          <div>
+            <div class="lang-name">German</div>
+            <div class="lang-native">Deutsch</div>
+          </div>
+        </div>
+        <div class="language-option">
+          <span class="flag">&#x1F1EE;&#x1F1F9;</span>
+          <div>
+            <div class="lang-name">Italian</div>
+            <div class="lang-native">Italiano</div>
+          </div>
+        </div>
+        <div class="language-option">
+          <span class="flag">&#x1F1F0;&#x1F1F7;</span>
+          <div>
+            <div class="lang-name">Korean</div>
+            <div class="lang-native">&#xD55C;&#xAD6D;&#xC5B4;</div>
+          </div>
+        </div>
+        <div class="language-option">
+          <span class="flag">&#x1F1F5;&#x1F1F9;</span>
+          <div>
+            <div class="lang-name">Portuguese</div>
+            <div class="lang-native">Portugues</div>
+          </div>
+        </div>
+        <div class="language-option">
+          <span class="flag">&#x1F1E8;&#x1F1F3;</span>
+          <div>
+            <div class="lang-name">Mandarin</div>
+            <div class="lang-native">&#x4E2D;&#x6587;</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="onboarding-actions">
+        <button class="btn btn-primary btn-lg w-full">Continue</button>
+      </div>
+    </div>
+
+    <!-- ====== STEP 2: Proficiency Level (shown below for reference) ====== -->
+    <div class="onboarding-card mt-lg" id="step2" style="opacity: 0.5;">
+      <div class="steps">
+        <div class="step-dot done"></div>
+        <div class="step-dot active"></div>
+        <div class="step-dot"></div>
+        <div class="step-dot"></div>
+      </div>
+
+      <h1>What's your level?</h1>
+      <p class="subtitle">This helps your tutor adapt to you right away</p>
+
+      <div class="level-options">
+        <div class="level-option selected">
+          <div class="level-badge beginner">A1</div>
+          <div class="level-info">
+            <h4>Complete Beginner</h4>
+            <p>I've never studied this language, or I only know a few words</p>
+          </div>
+        </div>
+        <div class="level-option">
+          <div class="level-badge elementary">A2</div>
+          <div class="level-info">
+            <h4>Elementary</h4>
+            <p>I can handle simple conversations about familiar topics</p>
+          </div>
+        </div>
+        <div class="level-option">
+          <div class="level-badge intermediate">B1</div>
+          <div class="level-info">
+            <h4>Intermediate</h4>
+            <p>I can discuss everyday topics and understand main points</p>
+          </div>
+        </div>
+        <div class="level-option">
+          <div class="level-badge advanced">B2+</div>
+          <div class="level-info">
+            <h4>Advanced</h4>
+            <p>I can hold detailed conversations and read most texts</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="onboarding-actions">
+        <button class="btn btn-secondary btn-lg">Back</button>
+        <button class="btn btn-primary btn-lg">Continue</button>
+      </div>
+    </div>
+
+    <!-- ====== STEP 3: Goals (shown below) ====== -->
+    <div class="onboarding-card mt-lg" id="step3" style="opacity: 0.35;">
+      <div class="steps">
+        <div class="step-dot done"></div>
+        <div class="step-dot done"></div>
+        <div class="step-dot active"></div>
+        <div class="step-dot"></div>
+      </div>
+
+      <h1>What's your goal?</h1>
+      <p class="subtitle">Select all that apply — this shapes your lessons</p>
+
+      <div class="goal-options">
+        <div class="goal-option selected">
+          <span class="goal-icon">&#x1F30D;</span>
+          <div class="goal-info">
+            <h4>Travel</h4>
+            <p>Navigate, order food, ask for directions</p>
+          </div>
+        </div>
+        <div class="goal-option">
+          <span class="goal-icon">&#x1F4BC;</span>
+          <div class="goal-info">
+            <h4>Work & Business</h4>
+            <p>Professional vocabulary, meetings, emails</p>
+          </div>
+        </div>
+        <div class="goal-option selected">
+          <span class="goal-icon">&#x1F4AC;</span>
+          <div class="goal-info">
+            <h4>Conversation</h4>
+            <p>Chat naturally with native speakers</p>
+          </div>
+        </div>
+        <div class="goal-option">
+          <span class="goal-icon">&#x1F4DA;</span>
+          <div class="goal-info">
+            <h4>Academic</h4>
+            <p>Exams, certifications, formal writing</p>
+          </div>
+        </div>
+        <div class="goal-option">
+          <span class="goal-icon">&#x1F3AC;</span>
+          <div class="goal-info">
+            <h4>Media & Culture</h4>
+            <p>Understand movies, music, books, and news</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="onboarding-actions">
+        <button class="btn btn-secondary btn-lg">Back</button>
+        <button class="btn btn-primary btn-lg">Continue</button>
+      </div>
+    </div>
+
+    <!-- ====== STEP 4: Meet your tutor ====== -->
+    <div class="onboarding-card mt-lg" id="step4" style="opacity: 0.2;">
+      <div class="steps">
+        <div class="step-dot done"></div>
+        <div class="step-dot done"></div>
+        <div class="step-dot done"></div>
+        <div class="step-dot active"></div>
+      </div>
+
+      <div class="welcome-teacher">
+        <div class="teacher-avatar">&#x1F393;</div>
+        <h1>Meet your tutor</h1>
+        <p class="teacher-greeting">
+          I'm your personal Spanish tutor. I'll adapt to your pace,
+          correct your mistakes gently, and make sure every conversation
+          moves you forward. Ready to start?
+        </p>
+        <p class="text-sm text-muted mb-lg">
+          Powered by a local AI running on your machine &mdash;
+          your conversations stay private.
+        </p>
+      </div>
+
+      <button class="btn btn-primary btn-lg w-full" style="font-size: 1.125rem; padding: 14px;">
+        Start my first lesson &#x2192;
+      </button>
+    </div>
+  </div>
+</body>
+</html>

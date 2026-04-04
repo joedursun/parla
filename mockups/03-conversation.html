@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duo — Conversation</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Conversation layout: chat + context panel */
+    .conversation-layout {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* --- Chat Area --- */
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .chat-header {
+      padding: var(--space-md) var(--space-lg);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .chat-header-info {
+      flex: 1;
+    }
+
+    .chat-header-title {
+      font-weight: 650;
+      font-size: 1rem;
+    }
+
+    .chat-header-meta {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .chat-header-meta .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: var(--radius-full);
+      background: var(--success);
+    }
+
+    .chat-header-actions {
+      display: flex;
+      gap: var(--space-xs);
+    }
+
+    /* Lesson topic banner */
+    .lesson-banner {
+      background: var(--primary-subtle);
+      padding: var(--space-sm) var(--space-lg);
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      font-size: 0.8125rem;
+      color: var(--primary);
+      font-weight: 500;
+      border-bottom: 1px solid #D4CEF8;
+    }
+
+    .lesson-banner .progress-mini {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .lesson-banner .progress-bar {
+      width: 120px;
+      height: 4px;
+    }
+
+    /* Messages container */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-lg);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-md);
+    }
+
+    /* Message bubbles */
+    .message {
+      display: flex;
+      gap: var(--space-sm);
+      max-width: 75%;
+      animation: fadeIn 200ms ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.tutor {
+      align-self: flex-start;
+    }
+
+    .message.student {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+
+    .message-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-full);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.875rem;
+      flex-shrink: 0;
+      align-self: flex-end;
+    }
+
+    .message.tutor .message-avatar {
+      background: linear-gradient(135deg, var(--primary), var(--primary-light));
+      color: white;
+    }
+
+    .message.student .message-avatar {
+      background: var(--border-light);
+      color: var(--text-secondary);
+    }
+
+    .message-content {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .bubble {
+      padding: var(--space-md);
+      border-radius: var(--radius-lg);
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      position: relative;
+    }
+
+    .message.tutor .bubble {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: var(--radius-sm);
+    }
+
+    .message.student .bubble {
+      background: var(--primary);
+      color: white;
+      border-bottom-right-radius: var(--radius-sm);
+    }
+
+    .bubble .target-text {
+      font-weight: 500;
+      display: block;
+    }
+
+    .bubble .translation {
+      display: block;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      font-style: italic;
+    }
+
+    .message.student .bubble .translation {
+      color: rgba(255,255,255,0.7);
+    }
+
+    /* Audio & action buttons on messages */
+    .message-actions {
+      display: flex;
+      gap: 4px;
+      padding: 0 4px;
+    }
+
+    .msg-action-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      transition: all var(--transition);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .msg-action-btn:hover {
+      background: var(--surface-hover);
+      color: var(--text);
+    }
+
+    /* Correction message */
+    .correction {
+      background: var(--accent-gold-subtle);
+      border: 1px solid #F0D88A;
+      border-radius: var(--radius-md);
+      padding: var(--space-sm) var(--space-md);
+      font-size: 0.8125rem;
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-sm);
+      max-width: 75%;
+      align-self: flex-start;
+      margin-left: 40px;
+    }
+
+    .correction-icon {
+      font-size: 1rem;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .correction .wrong {
+      text-decoration: line-through;
+      color: var(--danger);
+    }
+
+    .correction .right {
+      color: var(--success);
+      font-weight: 600;
+    }
+
+    .correction .explain {
+      color: var(--text-secondary);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    /* Vocabulary card inline */
+    .vocab-card-inline {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-md);
+      max-width: 360px;
+      align-self: flex-start;
+      margin-left: 40px;
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .vocab-card-inline .vocab-word {
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--primary);
+    }
+
+    .vocab-card-inline .vocab-meaning {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+    }
+
+    .vocab-card-inline .vocab-add-btn {
+      margin-left: auto;
+      background: var(--primary-subtle);
+      color: var(--primary);
+      border: none;
+      border-radius: var(--radius-full);
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 1.125rem;
+    }
+
+    /* Typing indicator */
+    .typing-indicator {
+      display: flex;
+      gap: var(--space-sm);
+      align-self: flex-start;
+      align-items: center;
+      padding: 0 4px;
+    }
+
+    .typing-indicator .message-avatar {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-light));
+      color: white;
+    }
+
+    .typing-dots {
+      display: flex;
+      gap: 4px;
+      padding: var(--space-sm) var(--space-md);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      border-bottom-left-radius: var(--radius-sm);
+    }
+
+    .typing-dots span {
+      width: 7px;
+      height: 7px;
+      border-radius: var(--radius-full);
+      background: var(--text-muted);
+      animation: typing 1.4s infinite;
+    }
+
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes typing {
+      0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+      30% { opacity: 1; transform: translateY(-4px); }
+    }
+
+    /* --- Chat Input --- */
+    .chat-input-area {
+      padding: var(--space-md) var(--space-lg);
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .input-row {
+      display: flex;
+      align-items: flex-end;
+      gap: var(--space-sm);
+      background: var(--bg);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-xl);
+      padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-md);
+      transition: border-color var(--transition);
+    }
+
+    .input-row:focus-within {
+      border-color: var(--primary);
+    }
+
+    .input-row textarea {
+      flex: 1;
+      border: none;
+      background: none;
+      font-family: var(--font);
+      font-size: 0.9375rem;
+      resize: none;
+      outline: none;
+      color: var(--text);
+      min-height: 24px;
+      max-height: 120px;
+      padding: var(--space-xs) 0;
+      line-height: 1.5;
+    }
+
+    .input-row textarea::placeholder {
+      color: var(--text-muted);
+    }
+
+    .input-actions {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .voice-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-full);
+      border: none;
+      background: var(--secondary);
+      color: white;
+      font-size: 1.125rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--transition);
+    }
+
+    .voice-btn:hover {
+      background: #d4634d;
+      transform: scale(1.05);
+    }
+
+    .voice-btn.recording {
+      background: var(--danger);
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(217, 75, 75, 0.4); }
+      50% { box-shadow: 0 0 0 8px rgba(217, 75, 75, 0); }
+    }
+
+    .send-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-full);
+      border: none;
+      background: var(--primary);
+      color: white;
+      font-size: 1.125rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--transition);
+    }
+
+    .send-btn:hover { background: var(--primary-dark); }
+
+    .input-hint {
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: var(--space-xs);
+    }
+
+    /* --- Context Panel --- */
+    .context-panel {
+      width: 320px;
+      border-left: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      overflow-y: auto;
+    }
+
+    .context-section {
+      padding: var(--space-lg);
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .context-section h4 {
+      margin-bottom: var(--space-md);
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* Lesson focus */
+    .lesson-focus-card {
+      background: var(--primary-subtle);
+      border-radius: var(--radius-md);
+      padding: var(--space-md);
+    }
+
+    .lesson-focus-card h3 {
+      color: var(--primary);
+      font-size: 0.9375rem;
+      margin-bottom: 4px;
+    }
+
+    .lesson-focus-card p {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+    }
+
+    .focus-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: var(--space-sm);
+    }
+
+    /* Vocabulary list in context */
+    .context-vocab-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-sm) 0;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .context-vocab-item:last-child { border-bottom: none; }
+
+    .context-vocab-word {
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+
+    .context-vocab-meaning {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+
+    .new-badge {
+      font-size: 0.625rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: var(--secondary);
+      color: white;
+      padding: 1px 6px;
+      border-radius: var(--radius-full);
+    }
+
+    /* Grammar notes */
+    .grammar-note {
+      background: var(--bg);
+      border-radius: var(--radius-md);
+      padding: var(--space-md);
+      margin-bottom: var(--space-sm);
+    }
+
+    .grammar-note:last-child { margin-bottom: 0; }
+
+    .grammar-note h4 {
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--text);
+    }
+
+    .grammar-note p {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .grammar-note code {
+      background: var(--primary-subtle);
+      color: var(--primary);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: var(--font);
+      font-size: 0.8125rem;
+      font-weight: 600;
+    }
+
+    /* Suggested responses */
+    .suggestion-chips {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-xs);
+    }
+
+    .suggestion-chip {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: var(--space-sm) var(--space-md);
+      font-size: 0.8125rem;
+      cursor: pointer;
+      transition: all var(--transition);
+      text-align: left;
+    }
+
+    .suggestion-chip:hover {
+      border-color: var(--primary);
+      background: var(--primary-subtle);
+    }
+
+    .suggestion-chip .chip-text {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .suggestion-chip .chip-hint {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <a class="sidebar-logo" href="#">
+        <div class="logo-icon">D</div>
+        Duo
+      </a>
+
+      <a class="nav-item" href="02-dashboard.html">
+        <span class="nav-icon">&#x2302;</span>
+        Dashboard
+      </a>
+      <a class="nav-item active" href="03-conversation.html">
+        <span class="nav-icon">&#x1F4AC;</span>
+        Conversations
+      </a>
+      <a class="nav-item" href="04-flashcards.html">
+        <span class="nav-icon">&#x1F0CF;</span>
+        Flashcards
+        <span class="badge">12</span>
+      </a>
+      <a class="nav-item" href="05-progress.html">
+        <span class="nav-icon">&#x1F4CA;</span>
+        Progress
+      </a>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Recent Conversations</div>
+        <a class="nav-item active" href="#">
+          <span class="nav-icon">&#x1F4AC;</span>
+          <span class="truncate">Ordering at a cafe</span>
+        </a>
+        <a class="nav-item" href="#">
+          <span class="nav-icon">&#x1F4AC;</span>
+          <span class="truncate">Asking for directions</span>
+        </a>
+        <a class="nav-item" href="#">
+          <span class="nav-icon">&#x1F4AC;</span>
+          <span class="truncate">Introducing yourself</span>
+        </a>
+      </div>
+
+      <div class="sidebar-footer">
+        <a class="nav-item" href="#">
+          <span class="nav-icon">&#x2699;</span>
+          Settings
+        </a>
+        <div class="user-card">
+          <div class="user-avatar">J</div>
+          <div class="user-info">
+            <div class="user-name">Joe</div>
+            <div class="user-level">Learning Spanish</div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main conversation area -->
+    <div class="conversation-layout">
+      <!-- Chat -->
+      <div class="chat-area">
+        <!-- Header -->
+        <div class="chat-header">
+          <div class="message-avatar" style="width:36px;height:36px;background:linear-gradient(135deg,var(--primary),var(--primary-light));color:white;font-size:1rem;">&#x1F393;</div>
+          <div class="chat-header-info">
+            <div class="chat-header-title">Your Spanish Tutor</div>
+            <div class="chat-header-meta">
+              <span class="dot"></span>
+              Active &middot; Lesson 4: Ordering Food
+            </div>
+          </div>
+          <div class="chat-header-actions">
+            <button class="btn btn-ghost btn-icon" title="Toggle translations">Aa</button>
+            <button class="btn btn-ghost btn-icon" title="Audio settings">&#x1F50A;</button>
+            <button class="btn btn-ghost btn-icon" title="More options">&#x22EE;</button>
+          </div>
+        </div>
+
+        <!-- Lesson banner -->
+        <div class="lesson-banner">
+          <span>&#x1F37D;</span>
+          <span>Lesson: Ordering Food &amp; Drinks at a Restaurant</span>
+          <div class="progress-mini">
+            <span class="text-xs">60%</span>
+            <div class="progress-bar">
+              <div class="fill" style="width: 60%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div class="messages">
+          <!-- Tutor intro -->
+          <div class="message tutor">
+            <div class="message-avatar">&#x1F393;</div>
+            <div class="message-content">
+              <div class="bubble">
+                <span class="target-text">&#xA1;Hola! Hoy vamos a practicar como pedir comida en un restaurante. Imagina que estamos en un cafe en Madrid. Yo soy el mesero. &#xBF;Que te gustaria ordenar?</span>
+                <span class="translation">Hi! Today we're going to practice ordering food at a restaurant. Imagine we're at a cafe in Madrid. I'm the waiter. What would you like to order?</span>
+              </div>
+              <div class="message-actions">
+                <button class="msg-action-btn" title="Play audio">&#x1F50A; Listen</button>
+                <button class="msg-action-btn" title="Slower">&#x1F40C; Slow</button>
+                <button class="msg-action-btn" title="Toggle translation">&#x1F441; Translation</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Student response -->
+          <div class="message student">
+            <div class="message-avatar">J</div>
+            <div class="message-content">
+              <div class="bubble">
+                <span class="target-text">Hola! Me gustaria un cafe con leche, por favor.</span>
+                <span class="translation">Hi! I would like a coffee with milk, please.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tutor response with praise -->
+          <div class="message tutor">
+            <div class="message-avatar">&#x1F393;</div>
+            <div class="message-content">
+              <div class="bubble">
+                <span class="target-text">&#xA1;Muy bien! Un cafe con leche, excelente eleccion. &#xBF;Y quieres algo para comer? Tenemos churros, tostadas, y tortilla espanola.</span>
+                <span class="translation">Very good! A coffee with milk, excellent choice. And do you want something to eat? We have churros, toast, and Spanish omelette.</span>
+              </div>
+              <div class="message-actions">
+                <button class="msg-action-btn">&#x1F50A; Listen</button>
+                <button class="msg-action-btn">&#x1F40C; Slow</button>
+                <button class="msg-action-btn">&#x1F441; Translation</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Vocab card appears for new word -->
+          <div class="vocab-card-inline">
+            <div>
+              <div class="vocab-word">tortilla espanola</div>
+              <div class="vocab-meaning">Spanish omelette (potato &amp; egg)</div>
+            </div>
+            <button class="vocab-add-btn" title="Save to flashcards">+</button>
+          </div>
+
+          <!-- Student response with mistake -->
+          <div class="message student">
+            <div class="message-avatar">J</div>
+            <div class="message-content">
+              <div class="bubble">
+                <span class="target-text">Si, yo quiero los churros. &#xBF;Cuanto es?</span>
+                <span class="translation">Yes, I want the churros. How much is it?</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gentle correction -->
+          <div class="correction">
+            <span class="correction-icon">&#x1F4A1;</span>
+            <div>
+              <div>
+                <span class="wrong">&#xBF;Cuanto es?</span> &rarr;
+                <span class="right">&#xBF;Cuanto cuesta?</span> or
+                <span class="right">&#xBF;Cuanto cuestan?</span>
+              </div>
+              <div class="explain">
+                When asking about prices, use <strong>costar</strong> (to cost). Since churros is plural, you'd say <em>&#xBF;cuanto cuestan?</em> — "how much do they cost?"
+              </div>
+            </div>
+          </div>
+
+          <!-- Tutor continues naturally -->
+          <div class="message tutor">
+            <div class="message-avatar">&#x1F393;</div>
+            <div class="message-content">
+              <div class="bubble">
+                <span class="target-text">&#xA1;Buena eleccion! Los churros cuestan tres euros con cincuenta. &#xBF;Quieres algo mas, o te traigo la cuenta?</span>
+                <span class="translation">Good choice! The churros cost three euros and fifty cents. Would you like anything else, or shall I bring you the bill?</span>
+              </div>
+              <div class="message-actions">
+                <button class="msg-action-btn">&#x1F50A; Listen</button>
+                <button class="msg-action-btn">&#x1F40C; Slow</button>
+                <button class="msg-action-btn">&#x1F441; Translation</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Typing indicator -->
+          <div class="typing-indicator" style="display: none;">
+            <div class="message-avatar">&#x1F393;</div>
+            <div class="typing-dots">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input -->
+        <div class="chat-input-area">
+          <div class="input-row">
+            <textarea rows="1" placeholder="Type in Spanish (or English to translate)..."></textarea>
+            <div class="input-actions">
+              <button class="voice-btn" title="Hold to speak">&#x1F3A4;</button>
+              <button class="send-btn" title="Send message">&#x27A4;</button>
+            </div>
+          </div>
+          <div class="input-hint">
+            Press Enter to send &middot; Hold the mic button to speak &middot; Type in English and we'll help you translate
+          </div>
+        </div>
+      </div>
+
+      <!-- Context Panel -->
+      <div class="context-panel">
+        <!-- Lesson Focus -->
+        <div class="context-section">
+          <h4>&#x1F3AF; Lesson Focus</h4>
+          <div class="lesson-focus-card">
+            <h3>Ordering Food &amp; Drinks</h3>
+            <p>Practice ordering at a restaurant, asking about prices, and making polite requests</p>
+            <div class="focus-tags">
+              <span class="tag tag-primary">Vocabulary</span>
+              <span class="tag tag-secondary">Polite forms</span>
+              <span class="tag tag-warning">Numbers</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- New Vocabulary -->
+        <div class="context-section">
+          <h4>&#x1F4D6; Vocabulary This Lesson</h4>
+          <div class="context-vocab-item">
+            <div>
+              <div class="context-vocab-word">me gustaria</div>
+              <div class="context-vocab-meaning">I would like</div>
+            </div>
+          </div>
+          <div class="context-vocab-item">
+            <div>
+              <div class="context-vocab-word">la cuenta</div>
+              <div class="context-vocab-meaning">the bill</div>
+            </div>
+          </div>
+          <div class="context-vocab-item">
+            <div>
+              <div class="context-vocab-word">cuanto cuesta</div>
+              <div class="context-vocab-meaning">how much does it cost</div>
+            </div>
+            <span class="new-badge">New</span>
+          </div>
+          <div class="context-vocab-item">
+            <div>
+              <div class="context-vocab-word">la eleccion</div>
+              <div class="context-vocab-meaning">the choice</div>
+            </div>
+            <span class="new-badge">New</span>
+          </div>
+          <div class="context-vocab-item">
+            <div>
+              <div class="context-vocab-word">algo mas</div>
+              <div class="context-vocab-meaning">anything else</div>
+            </div>
+          </div>
+          <div class="context-vocab-item">
+            <div>
+              <div class="context-vocab-word">tortilla espanola</div>
+              <div class="context-vocab-meaning">Spanish omelette</div>
+            </div>
+            <span class="new-badge">New</span>
+          </div>
+        </div>
+
+        <!-- Grammar Notes -->
+        <div class="context-section">
+          <h4>&#x1F4DD; Grammar Notes</h4>
+          <div class="grammar-note">
+            <h4>Costar (to cost)</h4>
+            <p>Use <code>cuesta</code> for singular, <code>cuestan</code> for plural items. <em>&#xBF;Cuanto cuesta el cafe? &#xBF;Cuanto cuestan los churros?</em></p>
+          </div>
+          <div class="grammar-note">
+            <h4>Polite Ordering</h4>
+            <p><code>Me gustaria</code> (I would like) is more polite than <code>quiero</code> (I want) when ordering.</p>
+          </div>
+        </div>
+
+        <!-- Suggested Responses -->
+        <div class="context-section">
+          <h4>&#x1F4AC; Try Saying</h4>
+          <div class="suggestion-chips">
+            <button class="suggestion-chip">
+              <div class="chip-text">No, eso es todo. La cuenta, por favor.</div>
+              <div class="chip-hint">That's all. The bill, please.</div>
+            </button>
+            <button class="suggestion-chip">
+              <div class="chip-text">&#xBF;Tienen algun postre?</div>
+              <div class="chip-hint">Do you have any desserts?</div>
+            </button>
+            <button class="suggestion-chip">
+              <div class="chip-text">Me gustaria tambien un vaso de agua.</div>
+              <div class="chip-hint">I would also like a glass of water.</div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

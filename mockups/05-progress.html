@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duo — Progress</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .page-body {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    /* Level overview */
+    .level-hero {
+      background: linear-gradient(135deg, var(--primary), var(--primary-light));
+      border-radius: var(--radius-xl);
+      padding: var(--space-xl) var(--space-2xl);
+      color: white;
+      display: flex;
+      align-items: center;
+      gap: var(--space-2xl);
+      margin-bottom: var(--space-xl);
+    }
+
+    .level-ring {
+      position: relative;
+      width: 140px;
+      height: 140px;
+      flex-shrink: 0;
+    }
+
+    .level-ring svg {
+      width: 140px;
+      height: 140px;
+      transform: rotate(-90deg);
+    }
+
+    .level-ring .ring-bg {
+      fill: none;
+      stroke: rgba(255,255,255,0.2);
+      stroke-width: 8;
+    }
+
+    .level-ring .ring-fill {
+      fill: none;
+      stroke: white;
+      stroke-width: 8;
+      stroke-linecap: round;
+      stroke-dasharray: 377;
+      stroke-dashoffset: 132; /* ~65% complete */
+      transition: stroke-dashoffset 1s ease;
+    }
+
+    .level-ring .ring-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .level-ring .ring-level {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .level-ring .ring-sublabel {
+      font-size: 0.75rem;
+      opacity: 0.8;
+    }
+
+    .level-info h2 {
+      font-size: 1.5rem;
+      margin-bottom: var(--space-xs);
+    }
+
+    .level-info p {
+      opacity: 0.85;
+      font-size: 0.9375rem;
+      margin-bottom: var(--space-md);
+      line-height: 1.6;
+    }
+
+    .level-milestones {
+      display: flex;
+      gap: var(--space-md);
+    }
+
+    .milestone {
+      background: rgba(255,255,255,0.15);
+      border-radius: var(--radius-md);
+      padding: var(--space-sm) var(--space-md);
+      font-size: 0.8125rem;
+      display: flex;
+      align-items: center;
+      gap: var(--space-xs);
+    }
+
+    .milestone.done { background: rgba(255,255,255,0.25); }
+
+    /* Skills grid */
+    .skills-section {
+      margin-bottom: var(--space-xl);
+    }
+
+    .skills-section h3 {
+      margin-bottom: var(--space-md);
+    }
+
+    .skills-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--space-md);
+    }
+
+    .skill-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+      text-align: center;
+    }
+
+    .skill-icon {
+      font-size: 1.5rem;
+      margin-bottom: var(--space-sm);
+    }
+
+    .skill-name {
+      font-weight: 600;
+      font-size: 0.9375rem;
+      margin-bottom: var(--space-xs);
+    }
+
+    .skill-level {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      margin-bottom: var(--space-md);
+    }
+
+    .skill-card .progress-bar {
+      margin-bottom: var(--space-xs);
+    }
+
+    .skill-pct {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-align: right;
+    }
+
+    /* Content grid */
+    .progress-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-lg);
+      margin-bottom: var(--space-xl);
+    }
+
+    /* Vocabulary breakdown */
+    .vocab-breakdown {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+    }
+
+    .vocab-breakdown h3 {
+      margin-bottom: var(--space-md);
+    }
+
+    .vocab-summary {
+      display: flex;
+      gap: var(--space-md);
+      margin-bottom: var(--space-lg);
+    }
+
+    .vocab-stat {
+      flex: 1;
+      text-align: center;
+      padding: var(--space-md);
+      border-radius: var(--radius-md);
+      background: var(--bg);
+    }
+
+    .vocab-stat .v-num {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .vocab-stat .v-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .vocab-stat.mastered .v-num { color: var(--success); }
+    .vocab-stat.learning .v-num { color: var(--secondary); }
+    .vocab-stat.new .v-num { color: var(--primary); }
+
+    /* Category bars */
+    .category-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-md);
+    }
+
+    .category-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .category-name {
+      width: 120px;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+
+    .category-bar {
+      flex: 1;
+      height: 20px;
+      background: var(--border-light);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      display: flex;
+    }
+
+    .category-bar .seg-mastered {
+      background: var(--success);
+      transition: width 600ms ease;
+    }
+
+    .category-bar .seg-learning {
+      background: var(--accent-gold);
+      transition: width 600ms ease;
+    }
+
+    .category-bar .seg-new {
+      background: var(--primary-light);
+      transition: width 600ms ease;
+    }
+
+    .category-count {
+      width: 40px;
+      text-align: right;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    /* Grammar progress */
+    .grammar-progress {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+    }
+
+    .grammar-progress h3 {
+      margin-bottom: var(--space-md);
+    }
+
+    .grammar-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      padding: var(--space-sm) 0;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .grammar-item:last-child { border-bottom: none; }
+
+    .grammar-status {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-full);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8125rem;
+      flex-shrink: 0;
+    }
+
+    .grammar-status.mastered { background: var(--success-subtle); color: var(--success); }
+    .grammar-status.learning { background: var(--accent-gold-subtle); color: var(--warning); }
+    .grammar-status.not-started { background: var(--border-light); color: var(--text-muted); }
+
+    .grammar-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .grammar-name {
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+
+    .grammar-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Weak areas */
+    .weak-areas {
+      background: var(--secondary-subtle);
+      border: 1px solid #F0C6BD;
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+      margin-bottom: var(--space-xl);
+    }
+
+    .weak-areas h3 {
+      color: var(--secondary);
+      margin-bottom: var(--space-sm);
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .weak-areas p {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+      margin-bottom: var(--space-md);
+    }
+
+    .weak-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-sm);
+    }
+
+    .weak-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: var(--space-sm) var(--space-md);
+      font-size: 0.8125rem;
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .weak-item .accuracy {
+      font-weight: 700;
+      color: var(--secondary);
+    }
+
+    /* Streak calendar */
+    .streak-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+    }
+
+    .streak-section h3 {
+      margin-bottom: var(--space-md);
+    }
+
+    .streak-calendar {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+
+    .streak-day-label {
+      text-align: center;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      padding-bottom: 4px;
+    }
+
+    .streak-day {
+      aspect-ratio: 1;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      position: relative;
+    }
+
+    .streak-day.active {
+      background: var(--primary-subtle);
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .streak-day.today {
+      border: 2px solid var(--primary);
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .streak-day.future {
+      color: var(--border);
+    }
+
+    .streak-day .fire {
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      font-size: 0.625rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <a class="sidebar-logo" href="#">
+        <div class="logo-icon">D</div>
+        Duo
+      </a>
+
+      <a class="nav-item" href="02-dashboard.html">
+        <span class="nav-icon">&#x2302;</span>
+        Dashboard
+      </a>
+      <a class="nav-item" href="03-conversation.html">
+        <span class="nav-icon">&#x1F4AC;</span>
+        Conversations
+      </a>
+      <a class="nav-item" href="04-flashcards.html">
+        <span class="nav-icon">&#x1F0CF;</span>
+        Flashcards
+        <span class="badge">12</span>
+      </a>
+      <a class="nav-item active" href="05-progress.html">
+        <span class="nav-icon">&#x1F4CA;</span>
+        Progress
+      </a>
+
+      <div class="sidebar-footer">
+        <a class="nav-item" href="#">
+          <span class="nav-icon">&#x2699;</span>
+          Settings
+        </a>
+        <div class="user-card">
+          <div class="user-avatar">J</div>
+          <div class="user-info">
+            <div class="user-name">Joe</div>
+            <div class="user-level">Learning Spanish</div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main -->
+    <main class="main-content">
+      <div class="page-body">
+        <!-- Level Hero -->
+        <div class="level-hero">
+          <div class="level-ring">
+            <svg viewBox="0 0 140 140">
+              <circle class="ring-bg" cx="70" cy="70" r="60"/>
+              <circle class="ring-fill" cx="70" cy="70" r="60"/>
+            </svg>
+            <div class="ring-label">
+              <span class="ring-level">A1</span>
+              <span class="ring-sublabel">Beginner</span>
+            </div>
+          </div>
+          <div class="level-info">
+            <h2>65% through A1 &mdash; Beginner</h2>
+            <p>You're building a solid foundation! You can greet people, ask basic questions, order food, and navigate simple conversations. Keep going &mdash; A2 is within reach.</p>
+            <div class="level-milestones">
+              <div class="milestone done">&#x2713; Greetings</div>
+              <div class="milestone done">&#x2713; Numbers</div>
+              <div class="milestone done">&#x2713; Directions</div>
+              <div class="milestone">&#x25CB; Food &amp; Dining</div>
+              <div class="milestone">&#x25CB; Shopping</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Skills Breakdown -->
+        <div class="skills-section">
+          <h3>Skills Breakdown</h3>
+          <div class="skills-grid">
+            <div class="skill-card">
+              <div class="skill-icon">&#x1F4D6;</div>
+              <div class="skill-name">Reading</div>
+              <div class="skill-level">A1 &middot; Beginner</div>
+              <div class="progress-bar">
+                <div class="fill success" style="width: 72%"></div>
+              </div>
+              <div class="skill-pct">72%</div>
+            </div>
+            <div class="skill-card">
+              <div class="skill-icon">&#x1F3A7;</div>
+              <div class="skill-name">Listening</div>
+              <div class="skill-level">A1 &middot; Beginner</div>
+              <div class="progress-bar">
+                <div class="fill" style="width: 58%"></div>
+              </div>
+              <div class="skill-pct">58%</div>
+            </div>
+            <div class="skill-card">
+              <div class="skill-icon">&#x270D;</div>
+              <div class="skill-name">Writing</div>
+              <div class="skill-level">A1 &middot; Beginner</div>
+              <div class="progress-bar">
+                <div class="fill accent" style="width: 65%"></div>
+              </div>
+              <div class="skill-pct">65%</div>
+            </div>
+            <div class="skill-card">
+              <div class="skill-icon">&#x1F5E3;</div>
+              <div class="skill-name">Speaking</div>
+              <div class="skill-level">A1 &middot; Beginner</div>
+              <div class="progress-bar">
+                <div class="fill warning" style="width: 45%"></div>
+              </div>
+              <div class="skill-pct">45%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Weak Areas -->
+        <div class="weak-areas">
+          <h3>&#x1F4A1; Areas to Focus On</h3>
+          <p>These are concepts where your accuracy has been below 60% recently. Extra practice here will accelerate your progress.</p>
+          <div class="weak-list">
+            <div class="weak-item">
+              <span>Verb conjugation (present)</span>
+              <span class="accuracy">42%</span>
+            </div>
+            <div class="weak-item">
+              <span>Gender agreement</span>
+              <span class="accuracy">51%</span>
+            </div>
+            <div class="weak-item">
+              <span>Question formation</span>
+              <span class="accuracy">55%</span>
+            </div>
+            <div class="weak-item">
+              <span>Pronunciation: rr</span>
+              <span class="accuracy">38%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Vocab & Grammar side by side -->
+        <div class="progress-grid">
+          <!-- Vocabulary -->
+          <div class="vocab-breakdown">
+            <h3>Vocabulary by Topic</h3>
+            <div class="vocab-summary">
+              <div class="vocab-stat mastered">
+                <div class="v-num">98</div>
+                <div class="v-label">Mastered</div>
+              </div>
+              <div class="vocab-stat learning">
+                <div class="v-num">54</div>
+                <div class="v-label">Learning</div>
+              </div>
+              <div class="vocab-stat new">
+                <div class="v-num">35</div>
+                <div class="v-label">New</div>
+              </div>
+            </div>
+            <div class="category-list">
+              <div class="category-item">
+                <span class="category-name">Greetings</span>
+                <div class="category-bar">
+                  <div class="seg-mastered" style="width:85%"></div>
+                  <div class="seg-learning" style="width:10%"></div>
+                  <div class="seg-new" style="width:5%"></div>
+                </div>
+                <span class="category-count">32</span>
+              </div>
+              <div class="category-item">
+                <span class="category-name">Numbers</span>
+                <div class="category-bar">
+                  <div class="seg-mastered" style="width:70%"></div>
+                  <div class="seg-learning" style="width:20%"></div>
+                  <div class="seg-new" style="width:10%"></div>
+                </div>
+                <span class="category-count">45</span>
+              </div>
+              <div class="category-item">
+                <span class="category-name">Directions</span>
+                <div class="category-bar">
+                  <div class="seg-mastered" style="width:55%"></div>
+                  <div class="seg-learning" style="width:30%"></div>
+                  <div class="seg-new" style="width:15%"></div>
+                </div>
+                <span class="category-count">38</span>
+              </div>
+              <div class="category-item">
+                <span class="category-name">Food &amp; Dining</span>
+                <div class="category-bar">
+                  <div class="seg-mastered" style="width:25%"></div>
+                  <div class="seg-learning" style="width:35%"></div>
+                  <div class="seg-new" style="width:40%"></div>
+                </div>
+                <span class="category-count">52</span>
+              </div>
+              <div class="category-item">
+                <span class="category-name">Daily Objects</span>
+                <div class="category-bar">
+                  <div class="seg-mastered" style="width:15%"></div>
+                  <div class="seg-learning" style="width:15%"></div>
+                  <div class="seg-new" style="width:70%"></div>
+                </div>
+                <span class="category-count">20</span>
+              </div>
+            </div>
+            <div class="flex justify-between items-center mt-md">
+              <div class="flex gap-md" style="font-size:0.75rem;">
+                <span class="flex items-center gap-xs"><span style="width:10px;height:10px;border-radius:2px;background:var(--success);display:inline-block;"></span> Mastered</span>
+                <span class="flex items-center gap-xs"><span style="width:10px;height:10px;border-radius:2px;background:var(--accent-gold);display:inline-block;"></span> Learning</span>
+                <span class="flex items-center gap-xs"><span style="width:10px;height:10px;border-radius:2px;background:var(--primary-light);display:inline-block;"></span> New</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Grammar -->
+          <div class="grammar-progress">
+            <h3>Grammar Concepts</h3>
+            <div class="grammar-item">
+              <div class="grammar-status mastered">&#x2713;</div>
+              <div class="grammar-info">
+                <div class="grammar-name">Subject pronouns</div>
+                <div class="grammar-desc">yo, tu, el/ella, nosotros...</div>
+              </div>
+              <span class="tag tag-success">Mastered</span>
+            </div>
+            <div class="grammar-item">
+              <div class="grammar-status mastered">&#x2713;</div>
+              <div class="grammar-info">
+                <div class="grammar-name">Ser vs Estar (basics)</div>
+                <div class="grammar-desc">Permanent vs temporary states</div>
+              </div>
+              <span class="tag tag-success">Mastered</span>
+            </div>
+            <div class="grammar-item">
+              <div class="grammar-status mastered">&#x2713;</div>
+              <div class="grammar-info">
+                <div class="grammar-name">Definite &amp; indefinite articles</div>
+                <div class="grammar-desc">el/la/los/las, un/una/unos/unas</div>
+              </div>
+              <span class="tag tag-success">Mastered</span>
+            </div>
+            <div class="grammar-item">
+              <div class="grammar-status learning">&#x25CB;</div>
+              <div class="grammar-info">
+                <div class="grammar-name">Present tense conjugation</div>
+                <div class="grammar-desc">Regular -ar, -er, -ir verbs</div>
+              </div>
+              <span class="tag tag-warning">Learning</span>
+            </div>
+            <div class="grammar-item">
+              <div class="grammar-status learning">&#x25CB;</div>
+              <div class="grammar-info">
+                <div class="grammar-name">Gender &amp; number agreement</div>
+                <div class="grammar-desc">Adjective-noun agreement</div>
+              </div>
+              <span class="tag tag-warning">Learning</span>
+            </div>
+            <div class="grammar-item">
+              <div class="grammar-status learning">&#x25CB;</div>
+              <div class="grammar-info">
+                <div class="grammar-name">Question words</div>
+                <div class="grammar-desc">Que, cual, donde, cuando, como</div>
+              </div>
+              <span class="tag tag-warning">Learning</span>
+            </div>
+            <div class="grammar-item">
+              <div class="grammar-status not-started">&#x2014;</div>
+              <div class="grammar-info">
+                <div class="grammar-name">Gustar &amp; similar verbs</div>
+                <div class="grammar-desc">Verbs that work "backwards"</div>
+              </div>
+              <span class="tag" style="background:var(--border-light);color:var(--text-muted);">Upcoming</span>
+            </div>
+            <div class="grammar-item">
+              <div class="grammar-status not-started">&#x2014;</div>
+              <div class="grammar-info">
+                <div class="grammar-name">Possessive adjectives</div>
+                <div class="grammar-desc">mi, tu, su, nuestro...</div>
+              </div>
+              <span class="tag" style="background:var(--border-light);color:var(--text-muted);">Upcoming</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Streak Calendar -->
+        <div class="streak-section">
+          <div class="flex justify-between items-center mb-md">
+            <h3>Practice Streak &mdash; March 2026</h3>
+            <div class="flex items-center gap-md">
+              <span style="font-size:1.5rem;">&#x1F525;</span>
+              <div>
+                <div style="font-weight:700;font-size:1.125rem;">14 day streak</div>
+                <div class="text-sm text-muted">Your longest: 14 days</div>
+              </div>
+            </div>
+          </div>
+          <div class="streak-calendar">
+            <!-- Day labels -->
+            <div class="streak-day-label">Mon</div>
+            <div class="streak-day-label">Tue</div>
+            <div class="streak-day-label">Wed</div>
+            <div class="streak-day-label">Thu</div>
+            <div class="streak-day-label">Fri</div>
+            <div class="streak-day-label">Sat</div>
+            <div class="streak-day-label">Sun</div>
+
+            <!-- Week 1 (starts mid-week for March) -->
+            <div class="streak-day" style="visibility:hidden;"></div>
+            <div class="streak-day" style="visibility:hidden;"></div>
+            <div class="streak-day" style="visibility:hidden;"></div>
+            <div class="streak-day" style="visibility:hidden;"></div>
+            <div class="streak-day" style="visibility:hidden;"></div>
+            <div class="streak-day" style="visibility:hidden;"></div>
+            <div class="streak-day">1</div>
+
+            <!-- Week 2 -->
+            <div class="streak-day">2</div>
+            <div class="streak-day">3</div>
+            <div class="streak-day">4</div>
+            <div class="streak-day">5</div>
+            <div class="streak-day">6</div>
+            <div class="streak-day">7</div>
+            <div class="streak-day">8</div>
+
+            <!-- Week 3 -->
+            <div class="streak-day">9</div>
+            <div class="streak-day">10</div>
+            <div class="streak-day">11</div>
+            <div class="streak-day">12</div>
+            <div class="streak-day">13</div>
+            <div class="streak-day">14</div>
+            <div class="streak-day">15</div>
+
+            <!-- Week 4 — streak starts March 21 -->
+            <div class="streak-day">16</div>
+            <div class="streak-day">17</div>
+            <div class="streak-day">18</div>
+            <div class="streak-day">19</div>
+            <div class="streak-day">20</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>21</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>22</div>
+
+            <!-- Week 5 -->
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>23</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>24</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>25</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>26</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>27</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>28</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>29</div>
+
+            <!-- Week 6 -->
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>30</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>31</div>
+            <div class="streak-day active today"><span class="fire">&#x1F525;</span>1</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>2</div>
+            <div class="streak-day active"><span class="fire">&#x1F525;</span>3</div>
+            <div class="streak-day today" style="background:var(--primary-subtle);">4</div>
+            <div class="streak-day future">5</div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

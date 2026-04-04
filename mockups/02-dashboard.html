@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duo — Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .page-body {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    /* Greeting header */
+    .greeting {
+      margin-bottom: var(--space-xl);
+    }
+
+    .greeting h1 {
+      font-size: 1.5rem;
+      margin-bottom: 4px;
+    }
+
+    .greeting p {
+      color: var(--text-secondary);
+      font-size: 0.9375rem;
+    }
+
+    /* Quick action cards */
+    .action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-md);
+      margin-bottom: var(--space-xl);
+    }
+
+    .action-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+      cursor: pointer;
+      transition: all var(--transition);
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-md);
+    }
+
+    .action-card:hover {
+      border-color: var(--primary-light);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-1px);
+    }
+
+    .action-card.primary-action {
+      background: linear-gradient(135deg, var(--primary), var(--primary-light));
+      border-color: transparent;
+      color: white;
+    }
+
+    .action-card.primary-action .action-meta { color: rgba(255,255,255,0.8); }
+
+    .action-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      flex-shrink: 0;
+    }
+
+    .action-card.primary-action .action-icon {
+      background: rgba(255,255,255,0.2);
+    }
+
+    .action-icon.chat { background: var(--primary-subtle); }
+    .action-icon.cards { background: var(--secondary-subtle); }
+    .action-icon.listen { background: var(--accent-gold-subtle); }
+
+    .action-title {
+      font-weight: 650;
+      font-size: 1rem;
+      margin-bottom: 4px;
+    }
+
+    .action-meta {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+    }
+
+    /* Stats row */
+    .stat-row {
+      margin-bottom: var(--space-xl);
+    }
+
+    .stat-card .stat-icon.streak { background: var(--accent-gold-subtle); color: var(--accent-gold); }
+    .stat-card .stat-icon.vocab { background: var(--primary-subtle); color: var(--primary); }
+    .stat-card .stat-icon.time { background: var(--success-subtle); color: var(--success); }
+    .stat-card .stat-icon.accuracy { background: var(--secondary-subtle); color: var(--secondary); }
+
+    .stat-trend {
+      font-size: 0.75rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .stat-trend.up { color: var(--success); }
+    .stat-trend.down { color: var(--danger); }
+
+    /* Two-column layout */
+    .content-grid {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: var(--space-lg);
+    }
+
+    /* Current lesson / next up */
+    .lesson-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+
+    .lesson-card-header {
+      padding: var(--space-lg);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .lesson-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      padding: var(--space-md) var(--space-lg);
+      border-top: 1px solid var(--border-light);
+      cursor: pointer;
+      transition: background var(--transition);
+    }
+
+    .lesson-item:hover {
+      background: var(--surface-hover);
+    }
+
+    .lesson-item.current {
+      background: var(--primary-subtle);
+      border-left: 3px solid var(--primary);
+    }
+
+    .lesson-num {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-full);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.8125rem;
+      flex-shrink: 0;
+    }
+
+    .lesson-num.done { background: var(--success); color: white; }
+    .lesson-num.active { background: var(--primary); color: white; }
+    .lesson-num.upcoming { background: var(--border-light); color: var(--text-muted); }
+
+    .lesson-info { flex: 1; min-width: 0; }
+    .lesson-title { font-weight: 600; font-size: 0.9375rem; }
+    .lesson-desc { font-size: 0.8125rem; color: var(--text-secondary); margin-top: 2px; }
+
+    .lesson-progress {
+      width: 60px;
+      text-align: right;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .lesson-progress.complete { color: var(--success); }
+
+    /* Recent words */
+    .words-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+    }
+
+    .words-header {
+      padding: var(--space-lg);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .word-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-sm) var(--space-lg);
+      border-top: 1px solid var(--border-light);
+    }
+
+    .word-target {
+      font-weight: 600;
+      font-size: 0.9375rem;
+    }
+
+    .word-native {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+    }
+
+    .word-strength {
+      display: flex;
+      gap: 3px;
+    }
+
+    .word-strength .bar {
+      width: 4px;
+      height: 16px;
+      border-radius: 2px;
+      background: var(--border-light);
+    }
+
+    .word-strength .bar.filled { background: var(--success); }
+    .word-strength .bar.medium { background: var(--accent-gold); }
+    .word-strength .bar.weak { background: var(--secondary); }
+
+    /* Upcoming reviews */
+    .review-banner {
+      background: var(--accent-gold-subtle);
+      border: 1px solid #F0D88A;
+      border-radius: var(--radius-lg);
+      padding: var(--space-md) var(--space-lg);
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      margin-top: var(--space-md);
+    }
+
+    .review-banner .review-icon {
+      font-size: 1.25rem;
+    }
+
+    .review-banner .review-text {
+      flex: 1;
+    }
+
+    .review-banner .review-text strong {
+      font-weight: 600;
+    }
+
+    .review-banner .review-text p {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+    }
+
+    /* Activity heatmap (simplified) */
+    .activity-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 3px;
+      padding: 0 var(--space-lg) var(--space-lg);
+    }
+
+    .activity-cell {
+      aspect-ratio: 1;
+      border-radius: 3px;
+      background: var(--border-light);
+    }
+
+    .activity-cell.level-1 { background: #D4CEF8; }
+    .activity-cell.level-2 { background: #A89CF0; }
+    .activity-cell.level-3 { background: var(--primary); }
+  </style>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <a class="sidebar-logo" href="#">
+        <div class="logo-icon">D</div>
+        Duo
+      </a>
+
+      <a class="nav-item active" href="02-dashboard.html">
+        <span class="nav-icon">&#x2302;</span>
+        Dashboard
+      </a>
+      <a class="nav-item" href="03-conversation.html">
+        <span class="nav-icon">&#x1F4AC;</span>
+        Conversations
+      </a>
+      <a class="nav-item" href="04-flashcards.html">
+        <span class="nav-icon">&#x1F0CF;</span>
+        Flashcards
+        <span class="badge">12</span>
+      </a>
+      <a class="nav-item" href="05-progress.html">
+        <span class="nav-icon">&#x1F4CA;</span>
+        Progress
+      </a>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Recent Conversations</div>
+        <a class="nav-item" href="#">
+          <span class="nav-icon">&#x1F4AC;</span>
+          <span class="truncate">Ordering at a cafe</span>
+        </a>
+        <a class="nav-item" href="#">
+          <span class="nav-icon">&#x1F4AC;</span>
+          <span class="truncate">Asking for directions</span>
+        </a>
+        <a class="nav-item" href="#">
+          <span class="nav-icon">&#x1F4AC;</span>
+          <span class="truncate">Introducing yourself</span>
+        </a>
+      </div>
+
+      <div class="sidebar-footer">
+        <a class="nav-item" href="#">
+          <span class="nav-icon">&#x2699;</span>
+          Settings
+        </a>
+        <div class="user-card">
+          <div class="user-avatar">J</div>
+          <div class="user-info">
+            <div class="user-name">Joe</div>
+            <div class="user-level">Learning Spanish</div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main -->
+    <main class="main-content">
+      <div class="page-body">
+        <!-- Greeting -->
+        <div class="greeting">
+          <h1>Buenos dias, Joe</h1>
+          <p>Day 14 of learning Spanish &middot; You have 12 cards to review</p>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="action-grid">
+          <div class="action-card primary-action">
+            <div class="action-icon">&#x1F393;</div>
+            <div>
+              <div class="action-title">Continue Lesson</div>
+              <div class="action-meta">Ordering food &mdash; 60% complete</div>
+            </div>
+          </div>
+          <div class="action-card">
+            <div class="action-icon cards">&#x1F0CF;</div>
+            <div>
+              <div class="action-title">Review Flashcards</div>
+              <div class="action-meta">12 cards due today</div>
+            </div>
+          </div>
+          <div class="action-card">
+            <div class="action-icon chat">&#x1F30D;</div>
+            <div>
+              <div class="action-title">Free Conversation</div>
+              <div class="action-meta">Practice speaking about anything</div>
+            </div>
+          </div>
+          <div class="action-card">
+            <div class="action-icon listen">&#x1F3A7;</div>
+            <div>
+              <div class="action-title">Listening Practice</div>
+              <div class="action-meta">Train your ear with audio exercises</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="stat-row">
+          <div class="stat-card">
+            <div class="stat-icon streak">&#x1F525;</div>
+            <div class="stat-value">14</div>
+            <div class="stat-label">Day streak</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon vocab">&#x1F4D6;</div>
+            <div class="stat-value">187</div>
+            <div class="stat-label">
+              Words learned
+              <span class="stat-trend up">+12 this week</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon time">&#x23F1;</div>
+            <div class="stat-value">4.2h</div>
+            <div class="stat-label">
+              Practice this week
+              <span class="stat-trend up">+30%</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon accuracy">&#x1F3AF;</div>
+            <div class="stat-value">78%</div>
+            <div class="stat-label">
+              Flashcard accuracy
+              <span class="stat-trend up">+5%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Content grid -->
+        <div class="content-grid">
+          <!-- Lesson pathway -->
+          <div class="lesson-card">
+            <div class="lesson-card-header">
+              <h3>Your Learning Path</h3>
+              <span class="tag tag-primary">A1 &mdash; Beginner</span>
+            </div>
+
+            <div class="lesson-item">
+              <div class="lesson-num done">&#x2713;</div>
+              <div class="lesson-info">
+                <div class="lesson-title">Greetings & Introductions</div>
+                <div class="lesson-desc">Hola, me llamo..., mucho gusto</div>
+              </div>
+              <div class="lesson-progress complete">Done</div>
+            </div>
+
+            <div class="lesson-item">
+              <div class="lesson-num done">&#x2713;</div>
+              <div class="lesson-info">
+                <div class="lesson-title">Numbers & Basic Questions</div>
+                <div class="lesson-desc">Counting, asking how much, how many</div>
+              </div>
+              <div class="lesson-progress complete">Done</div>
+            </div>
+
+            <div class="lesson-item">
+              <div class="lesson-num done">&#x2713;</div>
+              <div class="lesson-info">
+                <div class="lesson-title">Asking for Directions</div>
+                <div class="lesson-desc">Donde esta, a la izquierda, derecho</div>
+              </div>
+              <div class="lesson-progress complete">Done</div>
+            </div>
+
+            <div class="lesson-item current">
+              <div class="lesson-num active">4</div>
+              <div class="lesson-info">
+                <div class="lesson-title">Ordering Food & Drinks</div>
+                <div class="lesson-desc">Me gustaria, la cuenta, por favor</div>
+              </div>
+              <div class="lesson-progress" style="color: var(--primary);">60%</div>
+            </div>
+
+            <div class="lesson-item">
+              <div class="lesson-num upcoming">5</div>
+              <div class="lesson-info">
+                <div class="lesson-title">Shopping & Bargaining</div>
+                <div class="lesson-desc">Cuanto cuesta, tallas, colores</div>
+              </div>
+              <div class="lesson-progress">Upcoming</div>
+            </div>
+
+            <div class="lesson-item">
+              <div class="lesson-num upcoming">6</div>
+              <div class="lesson-info">
+                <div class="lesson-title">Describing People & Things</div>
+                <div class="lesson-desc">Adjectives, ser vs estar basics</div>
+              </div>
+              <div class="lesson-progress">Upcoming</div>
+            </div>
+
+            <div class="lesson-item">
+              <div class="lesson-num upcoming">7</div>
+              <div class="lesson-info">
+                <div class="lesson-title">Daily Routines</div>
+                <div class="lesson-desc">Present tense, reflexive verbs</div>
+              </div>
+              <div class="lesson-progress">Upcoming</div>
+            </div>
+          </div>
+
+          <!-- Right column -->
+          <div class="flex flex-col gap-md">
+            <!-- Review banner -->
+            <div class="review-banner">
+              <span class="review-icon">&#x1F4CB;</span>
+              <div class="review-text">
+                <strong>12 cards ready for review</strong>
+                <p>5 min estimated &middot; keeps your memory sharp</p>
+              </div>
+              <button class="btn btn-sm btn-primary">Review</button>
+            </div>
+
+            <!-- Recent vocabulary -->
+            <div class="words-panel">
+              <div class="words-header">
+                <h3>Recent Vocabulary</h3>
+                <button class="btn btn-ghost btn-sm">See all</button>
+              </div>
+
+              <div class="word-item">
+                <div>
+                  <div class="word-target">la cuenta</div>
+                  <div class="word-native">the bill</div>
+                </div>
+                <div class="word-strength">
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                </div>
+              </div>
+
+              <div class="word-item">
+                <div>
+                  <div class="word-target">me gustaria</div>
+                  <div class="word-native">I would like</div>
+                </div>
+                <div class="word-strength">
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                  <div class="bar"></div>
+                </div>
+              </div>
+
+              <div class="word-item">
+                <div>
+                  <div class="word-target">por favor</div>
+                  <div class="word-native">please</div>
+                </div>
+                <div class="word-strength">
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                </div>
+              </div>
+
+              <div class="word-item">
+                <div>
+                  <div class="word-target">el postre</div>
+                  <div class="word-native">dessert</div>
+                </div>
+                <div class="word-strength">
+                  <div class="bar medium"></div>
+                  <div class="bar medium"></div>
+                  <div class="bar"></div>
+                  <div class="bar"></div>
+                </div>
+              </div>
+
+              <div class="word-item">
+                <div>
+                  <div class="word-target">la propina</div>
+                  <div class="word-native">the tip</div>
+                </div>
+                <div class="word-strength">
+                  <div class="bar weak"></div>
+                  <div class="bar"></div>
+                  <div class="bar"></div>
+                  <div class="bar"></div>
+                </div>
+              </div>
+
+              <div class="word-item">
+                <div>
+                  <div class="word-target">el plato</div>
+                  <div class="word-native">the dish / plate</div>
+                </div>
+                <div class="word-strength">
+                  <div class="bar filled"></div>
+                  <div class="bar filled"></div>
+                  <div class="bar"></div>
+                  <div class="bar"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Activity mini heatmap -->
+            <div class="words-panel">
+              <div class="words-header">
+                <h3>Activity</h3>
+                <span class="text-sm text-muted">Last 4 weeks</span>
+              </div>
+              <div class="activity-grid">
+                <!-- Week labels -->
+                <div class="activity-cell level-1"></div>
+                <div class="activity-cell"></div>
+                <div class="activity-cell level-2"></div>
+                <div class="activity-cell level-1"></div>
+                <div class="activity-cell level-3"></div>
+                <div class="activity-cell"></div>
+                <div class="activity-cell level-1"></div>
+
+                <div class="activity-cell level-2"></div>
+                <div class="activity-cell level-1"></div>
+                <div class="activity-cell level-3"></div>
+                <div class="activity-cell level-2"></div>
+                <div class="activity-cell level-1"></div>
+                <div class="activity-cell"></div>
+                <div class="activity-cell level-2"></div>
+
+                <div class="activity-cell level-3"></div>
+                <div class="activity-cell level-2"></div>
+                <div class="activity-cell level-1"></div>
+                <div class="activity-cell level-3"></div>
+                <div class="activity-cell level-3"></div>
+                <div class="activity-cell level-1"></div>
+                <div class="activity-cell level-2"></div>
+
+                <div class="activity-cell level-2"></div>
+                <div class="activity-cell level-3"></div>
+                <div class="activity-cell level-2"></div>
+                <div class="activity-cell level-3"></div>
+                <div class="activity-cell"></div>
+                <div class="activity-cell"></div>
+                <div class="activity-cell"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
