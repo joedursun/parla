@@ -1,4 +1,43 @@
 <script lang="ts">
+	import { initAudio, startRecording, loopbackTest, stopPlayback, type StopRecordingResult } from '$lib/audio';
+	import { onMount } from 'svelte';
+
+	let isRecording = $state(false);
+	let audioReady = $state(false);
+	let lastRecording: StopRecordingResult | null = $state(null);
+
+	onMount(async () => {
+		try {
+			await initAudio();
+			audioReady = true;
+		} catch (e) {
+			console.error('Failed to init audio:', e);
+		}
+	});
+
+	async function onMicDown() {
+		if (!audioReady) return;
+		try {
+			await startRecording();
+			isRecording = true;
+		} catch (e) {
+			console.error('Failed to start recording:', e);
+		}
+	}
+
+	async function onMicUp() {
+		if (!isRecording) return;
+		try {
+			// Loopback test: play back what was just recorded
+			const result = await loopbackTest();
+			isRecording = false;
+			lastRecording = result;
+		} catch (e) {
+			console.error('Failed to stop recording:', e);
+			isRecording = false;
+		}
+	}
+
 	type Message = {
 		role: 'tutor' | 'student';
 		target: string;
@@ -137,15 +176,33 @@
 		</div>
 
 		<div class="chat-input-area">
+			{#if lastRecording}
+				<div class="recording-result">
+					Recorded {(lastRecording.duration_ms / 1000).toFixed(1)}s ({lastRecording.sample_count.toLocaleString()} samples) — playing back...
+				</div>
+			{/if}
 			<div class="input-row">
 				<textarea rows="1" placeholder="Type in Spanish (or English to translate)..."></textarea>
 				<div class="input-actions">
-					<button class="voice-btn" title="Hold to speak">&#x1F3A4;</button>
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<button
+						class="voice-btn"
+						class:recording={isRecording}
+						title={audioReady ? 'Hold to speak' : 'Initializing audio...'}
+						disabled={!audioReady}
+						onpointerdown={onMicDown}
+						onpointerup={onMicUp}
+						onpointerleave={onMicUp}
+					>&#x1F3A4;</button>
 					<button class="send-btn" title="Send message">&#x27A4;</button>
 				</div>
 			</div>
 			<div class="input-hint">
-				Press Enter to send &middot; Hold the mic button to speak &middot; Type in English and we'll help you translate
+				{#if isRecording}
+					<span class="recording-hint">Recording... release to stop</span>
+				{:else}
+					Press Enter to send &middot; Hold the mic button to speak &middot; Type in English and we'll help you translate
+				{/if}
 			</div>
 		</div>
 	</div>
@@ -265,9 +322,14 @@
 
 	.voice-btn { width: 40px; height: 40px; border-radius: var(--radius-full); border: none; background: var(--secondary); color: white; font-size: 1.125rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all var(--transition); }
 	.voice-btn:hover { background: #d4634d; transform: scale(1.05); }
+	.voice-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.voice-btn.recording { background: var(--danger); animation: pulse 1.5s infinite; }
+	@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(217, 75, 75, 0.4); } 50% { box-shadow: 0 0 0 8px rgba(217, 75, 75, 0); } }
 	.send-btn { width: 40px; height: 40px; border-radius: var(--radius-full); border: none; background: var(--primary); color: white; font-size: 1.125rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all var(--transition); }
 	.send-btn:hover { background: var(--primary-dark); }
 	.input-hint { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin-top: var(--space-xs); }
+	.recording-hint { color: var(--danger); font-weight: 600; }
+	.recording-result { text-align: center; font-size: 0.8125rem; color: var(--success); padding: var(--space-xs) 0; font-weight: 500; }
 
 	/* Context panel */
 	.context-panel { width: 320px; border-left: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
