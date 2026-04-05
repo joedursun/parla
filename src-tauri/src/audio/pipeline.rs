@@ -5,21 +5,40 @@ use tokio::sync::mpsc;
 
 use super::capture::{AudioCapture, AudioChunk};
 use super::playback::AudioPlayback;
+use crate::stt::WhisperStt;
+use crate::tts::Tts;
 use crate::vad::{SileroVad, SpeechSegment};
 
 enum AudioCommand {
     Init {
         reply: std_mpsc::Sender<Result<(), String>>,
     },
-    InitVad {
-        model_path: PathBuf,
-        reply: std_mpsc::Sender<Result<(), String>>,
+    SetVad {
+        vad: SileroVad,
+        reply: std_mpsc::Sender<()>,
+    },
+    SetStt {
+        stt: WhisperStt,
+        reply: std_mpsc::Sender<()>,
+    },
+    SetTts {
+        tts: Tts,
+        reply: std_mpsc::Sender<()>,
     },
     StartRecording {
         reply: std_mpsc::Sender<Result<(), String>>,
     },
     StopRecording {
         reply: std_mpsc::Sender<Result<RecordingResult, String>>,
+    },
+    Transcribe {
+        audio_16k: Vec<f32>,
+        segments: Vec<(usize, usize)>,
+        reply: std_mpsc::Sender<Result<String, String>>,
+    },
+    Synthesize {
+        text: String,
+        reply: std_mpsc::Sender<Result<Vec<f32>, String>>,
     },
     PlayAudio {
         samples: Vec<f32>,
@@ -41,9 +60,13 @@ pub struct AudioPipelineStatus {
     pub is_recording: bool,
     pub is_playing: bool,
     pub vad_active: bool,
+    pub stt_ready: bool,
+    pub tts_ready: bool,
     pub speech_detected: bool,
 }
 
+/// Shared handle to the audio pipeline. Cloneable — all clones talk to the same audio thread.
+#[derive(Clone)]
 pub struct AudioState {
     cmd_tx: std_mpsc::Sender<AudioCommand>,
 }
@@ -65,17 +88,39 @@ impl AudioState {
             .map_err(|_| "audio thread gone".to_string())?
     }
 
+    /// Load VAD model on the calling thread, then hand it to the audio thread.
     pub fn init_vad(&self, model_path: PathBuf) -> Result<(), String> {
+        let vad = SileroVad::new(&model_path, 0.5)?;
         let (reply_tx, reply_rx) = std_mpsc::channel();
         self.cmd_tx
-            .send(AudioCommand::InitVad {
-                model_path,
-                reply: reply_tx,
-            })
+            .send(AudioCommand::SetVad { vad, reply: reply_tx })
             .map_err(|_| "audio thread gone".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "audio thread gone".to_string())?
+        let _ = reply_rx.recv();
+        Ok(())
+    }
+
+    /// Load Whisper model on the calling thread, then hand it to the audio thread.
+    pub fn init_stt(&self, model_path: PathBuf) -> Result<(), String> {
+        eprintln!("[stt] loading whisper model from {}...", model_path.display());
+        let stt = WhisperStt::new(&model_path)?;
+        eprintln!("[stt] model loaded");
+        let (reply_tx, reply_rx) = std_mpsc::channel();
+        self.cmd_tx
+            .send(AudioCommand::SetStt { stt, reply: reply_tx })
+            .map_err(|_| "audio thread gone".to_string())?;
+        let _ = reply_rx.recv();
+        Ok(())
+    }
+
+    /// Load TTS engine on the calling thread, then hand it to the audio thread.
+    pub fn init_tts(&self, data_dir: PathBuf) -> Result<(), String> {
+        let tts = Tts::new(&data_dir)?;
+        let (reply_tx, reply_rx) = std_mpsc::channel();
+        self.cmd_tx
+            .send(AudioCommand::SetTts { tts, reply: reply_tx })
+            .map_err(|_| "audio thread gone".to_string())?;
+        let _ = reply_rx.recv();
+        Ok(())
     }
 
     pub fn start_recording(&self) -> Result<(), String> {
@@ -92,6 +137,37 @@ impl AudioState {
         let (reply_tx, reply_rx) = std_mpsc::channel();
         self.cmd_tx
             .send(AudioCommand::StopRecording { reply: reply_tx })
+            .map_err(|_| "audio thread gone".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "audio thread gone".to_string())?
+    }
+
+    pub fn transcribe(
+        &self,
+        audio_16k: &[f32],
+        segments: &[(usize, usize)],
+    ) -> Result<String, String> {
+        let (reply_tx, reply_rx) = std_mpsc::channel();
+        self.cmd_tx
+            .send(AudioCommand::Transcribe {
+                audio_16k: audio_16k.to_vec(),
+                segments: segments.to_vec(),
+                reply: reply_tx,
+            })
+            .map_err(|_| "audio thread gone".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "audio thread gone".to_string())?
+    }
+
+    pub fn synthesize(&self, text: &str) -> Result<Vec<f32>, String> {
+        let (reply_tx, reply_rx) = std_mpsc::channel();
+        self.cmd_tx
+            .send(AudioCommand::Synthesize {
+                text: text.to_string(),
+                reply: reply_tx,
+            })
             .map_err(|_| "audio thread gone".to_string())?;
         reply_rx
             .recv()
@@ -122,6 +198,8 @@ impl AudioState {
             is_recording: false,
             is_playing: false,
             vad_active: false,
+            stt_ready: false,
+            tts_ready: false,
             speech_detected: false,
         };
         if self
@@ -141,12 +219,12 @@ struct AudioThreadState {
     capture: Option<AudioCapture>,
     playback: Option<AudioPlayback>,
     capture_rx: Option<mpsc::UnboundedReceiver<AudioChunk>>,
-    /// Raw recording buffer at the device's native sample rate.
     raw_buffer: Vec<f32>,
-    /// Device capture sample rate (set after init).
     capture_rate: u32,
     vad: Option<SileroVad>,
     speech_segments: Vec<SpeechSegment>,
+    stt: Option<WhisperStt>,
+    tts: Option<Tts>,
 }
 
 impl AudioThreadState {
@@ -159,10 +237,11 @@ impl AudioThreadState {
             capture_rate: 16000,
             vad: None,
             speech_segments: Vec::new(),
+            stt: None,
+            tts: None,
         }
     }
 
-    /// Drain all pending audio chunks from the capture channel into raw_buffer.
     fn drain_capture(&mut self) {
         if let Some(ref mut rx) = self.capture_rx {
             while let Ok(chunk) = rx.try_recv() {
@@ -171,8 +250,6 @@ impl AudioThreadState {
         }
     }
 
-    /// Resample the raw buffer from the device rate to 16kHz.
-    /// Returns the 16kHz mono audio.
     fn resample_to_16k(&self) -> Vec<f32> {
         if self.capture_rate == 16000 {
             self.raw_buffer.clone()
@@ -181,7 +258,6 @@ impl AudioThreadState {
         }
     }
 
-    /// Run VAD over a 16kHz buffer and collect speech segments.
     fn run_vad(&mut self, audio_16k: &[f32]) {
         if let Some(ref mut v) = self.vad {
             for chunk in audio_16k.chunks(512) {
@@ -212,11 +288,17 @@ fn audio_thread_main(cmd_rx: std_mpsc::Receiver<AudioCommand>) {
                 })();
                 let _ = reply.send(result);
             }
-            AudioCommand::InitVad { model_path, reply } => {
-                let result = SileroVad::new(&model_path, 0.5).map(|v| {
-                    s.vad = Some(v);
-                });
-                let _ = reply.send(result);
+            AudioCommand::SetVad { vad, reply } => {
+                s.vad = Some(vad);
+                let _ = reply.send(());
+            }
+            AudioCommand::SetStt { stt, reply } => {
+                s.stt = Some(stt);
+                let _ = reply.send(());
+            }
+            AudioCommand::SetTts { tts, reply } => {
+                s.tts = Some(tts);
+                let _ = reply.send(());
             }
             AudioCommand::StartRecording { reply } => {
                 s.raw_buffer.clear();
@@ -235,11 +317,9 @@ fn audio_thread_main(cmd_rx: std_mpsc::Receiver<AudioCommand>) {
                 if let Some(ref cap) = s.capture {
                     cap.stop();
                 }
-                // Small delay to let the last callback chunks arrive
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 s.drain_capture();
 
-                // Batch-resample the entire recording to 16kHz
                 let audio_16k = s.resample_to_16k();
                 s.run_vad(&audio_16k);
 
@@ -248,6 +328,26 @@ fn audio_thread_main(cmd_rx: std_mpsc::Receiver<AudioCommand>) {
                     speech_segments: std::mem::take(&mut s.speech_segments),
                 }));
                 s.raw_buffer.clear();
+            }
+            AudioCommand::Transcribe {
+                audio_16k,
+                segments,
+                reply,
+            } => {
+                let result = if let Some(ref stt) = s.stt {
+                    stt.transcribe_segments(&audio_16k, &segments)
+                } else {
+                    Err("STT not initialized".into())
+                };
+                let _ = reply.send(result);
+            }
+            AudioCommand::Synthesize { text, reply } => {
+                let result = if let Some(ref mut tts) = s.tts {
+                    tts.synthesize(&text)
+                } else {
+                    Err("TTS not initialized".into())
+                };
+                let _ = reply.send(result);
             }
             AudioCommand::PlayAudio {
                 samples,
@@ -273,6 +373,8 @@ fn audio_thread_main(cmd_rx: std_mpsc::Receiver<AudioCommand>) {
                     is_recording: s.capture.as_ref().map_or(false, |c| c.is_recording()),
                     is_playing: s.playback.as_ref().map_or(false, |p| p.is_playing()),
                     vad_active: s.vad.is_some(),
+                    stt_ready: s.stt.is_some(),
+                    tts_ready: s.tts.is_some(),
                     speech_detected: s.vad.as_ref().map_or(false, |v| v.is_speaking()),
                 });
             }

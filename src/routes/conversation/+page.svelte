@@ -1,23 +1,36 @@
 <script lang="ts">
-	import { initAudio, startRecording, loopbackTest, stopPlayback, type StopRecordingResult } from '$lib/audio';
-	import { onMount } from 'svelte';
+	import { audioStatus, startRecording, stopRecordingAndTranscribe, speakText, stopPlayback, type StopRecordingResult, type AudioStatus } from '$lib/audio';
+	import { onMount, onDestroy } from 'svelte';
 
 	let isRecording = $state(false);
-	let audioReady = $state(false);
+	let status: AudioStatus | null = $state(null);
 	let lastRecording: StopRecordingResult | null = $state(null);
+	let processingAudio = $state(false);
 
-	onMount(async () => {
-		try {
-			await initAudio();
-			audioReady = true;
-		} catch (e) {
-			console.error('Failed to init audio:', e);
-		}
+	// Live conversation messages from actual voice interaction
+	let liveMessages: Message[] = $state([]);
+
+	// Poll model readiness (models load in background at app startup)
+	let pollTimer: ReturnType<typeof setInterval>;
+
+	onMount(() => {
+		pollTimer = setInterval(async () => {
+			try {
+				status = await audioStatus();
+				// Stop polling once everything is loaded
+				if (status.stt_ready && status.tts_ready && status.vad_active) {
+					clearInterval(pollTimer);
+				}
+			} catch {}
+		}, 500);
 	});
 
+	onDestroy(() => clearInterval(pollTimer));
+
 	async function onMicDown() {
-		if (!audioReady) return;
 		try {
+			// Barge-in: stop any current playback when user starts speaking
+			stopPlayback().catch(() => {});
 			await startRecording();
 			isRecording = true;
 		} catch (e) {
@@ -27,14 +40,31 @@
 
 	async function onMicUp() {
 		if (!isRecording) return;
+		isRecording = false;
+		processingAudio = true;
 		try {
-			// Loopback test: play back what was just recorded
-			const result = await loopbackTest();
-			isRecording = false;
+			const result = await stopRecordingAndTranscribe();
 			lastRecording = result;
+			if (result.transcription && result.transcription.trim()) {
+				const userText = result.transcription.trim();
+				liveMessages = [...liveMessages, {
+					role: 'student',
+					target: userText,
+					translation: '',
+				}];
+				// Stub tutor echo response — will be replaced by LLM in Phase 2
+				const echo = `I heard: "${userText}"`;
+				liveMessages = [...liveMessages, {
+					role: 'tutor',
+					target: echo,
+					translation: '',
+				}];
+				speakText(echo).catch(e => console.warn('TTS failed:', e));
+			}
 		} catch (e) {
-			console.error('Failed to stop recording:', e);
-			isRecording = false;
+			console.error('Failed to process recording:', e);
+		} finally {
+			processingAudio = false;
 		}
 	}
 
@@ -135,7 +165,9 @@
 					<div class="message-content">
 						<div class="bubble">
 							<span class="target-text">{msg.target}</span>
-							<span class="translation">{msg.translation}</span>
+							{#if msg.translation}
+								<span class="translation">{msg.translation}</span>
+							{/if}
 						</div>
 						{#if msg.role === 'tutor'}
 							<div class="message-actions">
@@ -173,12 +205,35 @@
 					</div>
 				{/if}
 			{/each}
+
+			{#each liveMessages as msg}
+				<div class="message {msg.role}">
+					<div class="message-avatar">
+						{#if msg.role === 'tutor'}&#x1F393;{:else}J{/if}
+					</div>
+					<div class="message-content">
+						<div class="bubble">
+							<span class="target-text">{msg.target}</span>
+							{#if msg.translation}
+								<span class="translation">{msg.translation}</span>
+							{/if}
+						</div>
+					</div>
+				</div>
+			{/each}
 		</div>
 
 		<div class="chat-input-area">
-			{#if lastRecording}
+			{#if processingAudio}
+				<div class="recording-result" style="color: var(--primary);">
+					Processing audio...
+				</div>
+			{:else if lastRecording}
 				<div class="recording-result">
-					Recorded {(lastRecording.duration_ms / 1000).toFixed(1)}s ({lastRecording.sample_count.toLocaleString()} samples) — playing back...
+					Recorded {(lastRecording.duration_ms / 1000).toFixed(1)}s
+					{#if lastRecording.speech_segments.length > 0}
+						&middot; {lastRecording.speech_segments.length} speech segment{lastRecording.speech_segments.length !== 1 ? 's' : ''}
+					{/if}
 				</div>
 			{/if}
 			<div class="input-row">
@@ -188,8 +243,8 @@
 					<button
 						class="voice-btn"
 						class:recording={isRecording}
-						title={audioReady ? 'Hold to speak' : 'Initializing audio...'}
-						disabled={!audioReady}
+						title={status?.stt_ready ? 'Hold to speak' : 'Loading models...'}
+						disabled={!status?.stt_ready}
 						onpointerdown={onMicDown}
 						onpointerup={onMicUp}
 						onpointerleave={onMicUp}
@@ -200,8 +255,12 @@
 			<div class="input-hint">
 				{#if isRecording}
 					<span class="recording-hint">Recording... release to stop</span>
+				{:else if processingAudio}
+					<span style="color: var(--primary);">Transcribing...</span>
+				{:else if !status?.stt_ready}
+					Loading speech recognition...
 				{:else}
-					Press Enter to send &middot; Hold the mic button to speak &middot; Type in English and we'll help you translate
+					Hold the mic button to speak
 				{/if}
 			</div>
 		</div>
