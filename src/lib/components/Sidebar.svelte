@@ -1,12 +1,64 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { store } from '$lib/stores.svelte';
+	import { renameConversation, deleteConversation } from '$lib/conversation';
 
 	const userProfile = $derived(store.userProfile);
 	const recentConversations = $derived(store.recentConversations);
 	const flashcardsDueCount = $derived(store.flashcardsDueCount);
 
 	const pathname = $derived(page.url.pathname);
+
+	// ── Inline editing state ────────────────────────────────────────────
+	let editingId: string | null = $state(null);
+	let editValue = $state('');
+
+	function startEditing(conv: { id: string; title: string }, e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		editingId = conv.id;
+		editValue = conv.title;
+	}
+
+	async function commitEdit() {
+		if (editingId && editValue.trim()) {
+			try {
+				await renameConversation(parseInt(editingId, 10), editValue.trim());
+			} catch (err) {
+				console.error('Rename failed:', err);
+			}
+		}
+		editingId = null;
+	}
+
+	function cancelEdit() {
+		editingId = null;
+	}
+
+	function handleEditKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			commitEdit();
+		} else if (e.key === 'Escape') {
+			cancelEdit();
+		}
+	}
+
+	async function handleDelete(conv: { id: string; title: string }, e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		try {
+			await deleteConversation(parseInt(conv.id, 10));
+			// If we were viewing this conversation, navigate away.
+			const currentId = page.url.searchParams.get('id');
+			if (currentId === conv.id) {
+				goto('/conversation');
+			}
+		} catch (err) {
+			console.error('Delete failed:', err);
+		}
+	}
 </script>
 
 <nav class="sidebar">
@@ -39,10 +91,36 @@
 		<div class="nav-section">
 			<div class="nav-section-title">Recent Conversations</div>
 			{#each recentConversations as conv}
-				<a class="nav-item" href="/conversation">
-					<span class="nav-icon">&#x1F4AC;</span>
-					<span class="truncate">{conv.title}</span>
-				</a>
+				{#if editingId === conv.id}
+					<!-- svelte-ignore a11y_autofocus -->
+				<div class="nav-item editing">
+						<input
+							class="edit-input"
+							type="text"
+							bind:value={editValue}
+							onkeydown={handleEditKeydown}
+							onblur={commitEdit}
+							autofocus
+						/>
+					</div>
+				{:else}
+					<a class="nav-item conv-item" href="/conversation?id={conv.id}">
+						<span class="nav-icon">&#x1F4AC;</span>
+						<span class="truncate">{conv.title}</span>
+						<span class="conv-actions">
+							<button
+								class="action-btn"
+								title="Rename"
+								onclick={(e) => startEditing(conv, e)}
+							>&#x270E;</button>
+							<button
+								class="action-btn delete"
+								title="Delete"
+								onclick={(e) => handleDelete(conv, e)}
+							>&#x2715;</button>
+						</span>
+					</a>
+				{/if}
 			{/each}
 		</div>
 	{/if}
@@ -159,6 +237,54 @@
 		border-radius: var(--radius-full);
 		min-width: 20px;
 		text-align: center;
+	}
+
+	/* ── Conversation item actions ───────────────────────────────── */
+	.conv-actions {
+		display: none;
+		margin-left: auto;
+		gap: 2px;
+		flex-shrink: 0;
+	}
+	.conv-item:hover .conv-actions {
+		display: flex;
+	}
+	.action-btn {
+		width: 22px;
+		height: 22px;
+		border: none;
+		background: none;
+		color: var(--text-muted);
+		font-size: 0.75rem;
+		cursor: pointer;
+		border-radius: var(--radius-sm);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all var(--transition);
+	}
+	.action-btn:hover {
+		background: var(--bg);
+		color: var(--text);
+	}
+	.action-btn.delete:hover {
+		color: var(--danger);
+	}
+
+	/* ── Inline editing ──────────────────────────────────────────── */
+	.nav-item.editing {
+		padding: var(--space-xs) var(--space-sm);
+	}
+	.edit-input {
+		width: 100%;
+		border: 1px solid var(--primary);
+		background: var(--bg);
+		color: var(--text);
+		font-family: var(--font);
+		font-size: 0.875rem;
+		padding: var(--space-xs) var(--space-sm);
+		border-radius: var(--radius-sm);
+		outline: none;
 	}
 
 	.sidebar-footer {

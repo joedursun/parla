@@ -19,8 +19,23 @@ impl WhisperStt {
         Ok(Self { ctx })
     }
 
-    /// Transcribe 16kHz mono f32 audio to text.
-    pub fn transcribe(&self, audio_16k: &[f32]) -> Result<String, String> {
+    /// Transcribe 16kHz mono f32 audio to text in the specified language.
+    /// If `lang` is None, Whisper auto-detects the language.
+    pub fn transcribe(&self, audio_16k: &[f32], lang: Option<&str>) -> Result<String, String> {
+        self.run_whisper(audio_16k, lang, false)
+    }
+
+    /// Translate 16kHz mono f32 audio to English text.
+    pub fn translate(&self, audio_16k: &[f32]) -> Result<String, String> {
+        self.run_whisper(audio_16k, None, true)
+    }
+
+    fn run_whisper(
+        &self,
+        audio_16k: &[f32],
+        lang: Option<&str>,
+        translate: bool,
+    ) -> Result<String, String> {
         let mut state = self
             .ctx
             .create_state()
@@ -33,9 +48,12 @@ impl WhisperStt {
         params.set_print_special(false);
         params.set_suppress_blank(true);
         params.set_suppress_nst(true);
-        // Single segment mode for short utterances
         params.set_single_segment(false);
         params.set_n_threads(4);
+        if let Some(l) = lang {
+            params.set_language(Some(l));
+        }
+        params.set_translate(translate);
 
         state
             .full(params, audio_16k)
@@ -60,10 +78,11 @@ impl WhisperStt {
     pub fn transcribe_segments(
         &self,
         audio_16k: &[f32],
-        segments: &[(usize, usize)], // (start_sample, end_sample) pairs
+        segments: &[(usize, usize)],
+        lang: Option<&str>,
     ) -> Result<String, String> {
         if segments.is_empty() {
-            return self.transcribe(audio_16k);
+            return self.transcribe(audio_16k, lang);
         }
 
         let mut full_text = String::new();
@@ -78,7 +97,40 @@ impl WhisperStt {
             if segment_audio.len() < 4800 {
                 continue;
             }
-            let text = self.transcribe(segment_audio)?;
+            let text = self.transcribe(segment_audio, lang)?;
+            if !text.is_empty() {
+                if !full_text.is_empty() {
+                    full_text.push(' ');
+                }
+                full_text.push_str(&text);
+            }
+        }
+
+        Ok(full_text)
+    }
+
+    /// Translate only the speech segments (from VAD) to English.
+    pub fn translate_segments(
+        &self,
+        audio_16k: &[f32],
+        segments: &[(usize, usize)],
+    ) -> Result<String, String> {
+        if segments.is_empty() {
+            return self.translate(audio_16k);
+        }
+
+        let mut full_text = String::new();
+        for &(start, end) in segments {
+            let start = start.min(audio_16k.len());
+            let end = end.min(audio_16k.len());
+            if start >= end {
+                continue;
+            }
+            let segment_audio = &audio_16k[start..end];
+            if segment_audio.len() < 4800 {
+                continue;
+            }
+            let text = self.translate(segment_audio)?;
             if !text.is_empty() {
                 if !full_text.is_empty() {
                     full_text.push(' ');

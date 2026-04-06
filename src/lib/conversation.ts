@@ -106,6 +106,48 @@ export async function getRecentConversations(): Promise<RecentConversationResult
 	return invoke('get_recent_conversations');
 }
 
+/** Rename a conversation's title. */
+export async function renameConversation(conversationId: number, title: string): Promise<void> {
+	return invoke('rename_conversation', { conversationId, title });
+}
+
+/** Delete a conversation and its messages/corrections. */
+export async function deleteConversation(conversationId: number): Promise<void> {
+	return invoke('delete_conversation', { conversationId });
+}
+
+// ── Flashcards ──────────────────────────────────────────────────────
+
+export interface FlashcardResult {
+	word: string;
+	meaning: string;
+	pronunciation: string;
+	exampleTarget: string;
+	exampleNative: string;
+	source: string;
+	status: 'New' | 'Learning' | 'Mature' | 'Due';
+	nextReview: string;
+	dots: boolean[];
+}
+
+/** Fetch all flashcards with vocabulary data. */
+export async function getFlashcards(): Promise<FlashcardResult[]> {
+	return invoke('get_flashcards');
+}
+
+// ── Conversation loading ────────────────────────────────────────────
+
+export interface LoadedMessage {
+	role: string;
+	content: string;
+	translation: string;
+}
+
+/** Load a previous conversation's messages from the database. */
+export async function loadConversation(conversationId: number): Promise<LoadedMessage[]> {
+	return invoke('load_conversation', { conversationId });
+}
+
 /** Clear the in-memory conversation history (start a fresh session). */
 export async function resetConversation(): Promise<void> {
 	await invoke('reset_conversation');

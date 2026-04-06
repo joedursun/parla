@@ -5,8 +5,7 @@ fn main() {
 
     // Copy espeak-ng-data to the target directory so espeak-rs can find it at runtime.
     // espeak-rs looks for espeak-ng-data next to the executable.
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    let espeak_data_src = find_espeak_data(&out_dir);
+    let espeak_data_src = find_espeak_data();
     if let Some(src) = espeak_data_src {
         let target_dir = get_target_dir();
         let dst = target_dir.join("espeak-ng-data");
@@ -18,8 +17,8 @@ fn main() {
     }
 }
 
-fn find_espeak_data(out_dir: &PathBuf) -> Option<PathBuf> {
-    // Walk up from our OUT_DIR to find the espeak-rs-sys build output
+fn find_espeak_data() -> Option<PathBuf> {
+    // Walk up from the target dir to find the espeak-rs-sys build output
     let target_dir = get_target_dir();
     let build_dir = target_dir.join("build");
     if build_dir.exists() {
@@ -34,13 +33,6 @@ fn find_espeak_data(out_dir: &PathBuf) -> Option<PathBuf> {
             }
         }
     }
-    // Also check relative to our own OUT_DIR
-    let share = out_dir
-        .parent()?
-        .parent()?
-        .parent()?
-        .join("espeak-rs-sys-*/out/share/espeak-ng-data");
-    // glob isn't available, try the build dir approach
     None
 }
 

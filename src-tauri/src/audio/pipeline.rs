@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use super::capture::{AudioCapture, AudioChunk};
 use super::playback::AudioPlayback;
 use crate::stt::WhisperStt;
-use crate::tts::Tts;
+use crate::tts::{Tts, TtsOutput};
 use crate::vad::{SileroVad, SpeechSegment};
 
 enum AudioCommand {
@@ -34,11 +34,14 @@ enum AudioCommand {
     Transcribe {
         audio_16k: Vec<f32>,
         segments: Vec<(usize, usize)>,
+        lang: Option<String>,
+        translate: bool,
         reply: std_mpsc::Sender<Result<String, String>>,
     },
     Synthesize {
         text: String,
-        reply: std_mpsc::Sender<Result<Vec<f32>, String>>,
+        lang: String,
+        reply: std_mpsc::Sender<Result<TtsOutput, String>>,
     },
     PlayAudio {
         samples: Vec<f32>,
@@ -147,12 +150,15 @@ impl AudioState {
         &self,
         audio_16k: &[f32],
         segments: &[(usize, usize)],
+        lang: Option<&str>,
     ) -> Result<String, String> {
         let (reply_tx, reply_rx) = std_mpsc::channel();
         self.cmd_tx
             .send(AudioCommand::Transcribe {
                 audio_16k: audio_16k.to_vec(),
                 segments: segments.to_vec(),
+                lang: lang.map(|s| s.to_string()),
+                translate: false,
                 reply: reply_tx,
             })
             .map_err(|_| "audio thread gone".to_string())?;
@@ -161,11 +167,32 @@ impl AudioState {
             .map_err(|_| "audio thread gone".to_string())?
     }
 
-    pub fn synthesize(&self, text: &str) -> Result<Vec<f32>, String> {
+    pub fn translate(
+        &self,
+        audio_16k: &[f32],
+        segments: &[(usize, usize)],
+    ) -> Result<String, String> {
+        let (reply_tx, reply_rx) = std_mpsc::channel();
+        self.cmd_tx
+            .send(AudioCommand::Transcribe {
+                audio_16k: audio_16k.to_vec(),
+                segments: segments.to_vec(),
+                lang: None,
+                translate: true,
+                reply: reply_tx,
+            })
+            .map_err(|_| "audio thread gone".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "audio thread gone".to_string())?
+    }
+
+    pub fn synthesize(&self, text: &str, lang: &str) -> Result<TtsOutput, String> {
         let (reply_tx, reply_rx) = std_mpsc::channel();
         self.cmd_tx
             .send(AudioCommand::Synthesize {
                 text: text.to_string(),
+                lang: lang.to_string(),
                 reply: reply_tx,
             })
             .map_err(|_| "audio thread gone".to_string())?;
@@ -332,18 +359,28 @@ fn audio_thread_main(cmd_rx: std_mpsc::Receiver<AudioCommand>) {
             AudioCommand::Transcribe {
                 audio_16k,
                 segments,
+                lang,
+                translate,
                 reply,
             } => {
                 let result = if let Some(ref stt) = s.stt {
-                    stt.transcribe_segments(&audio_16k, &segments)
+                    if translate {
+                        stt.translate_segments(&audio_16k, &segments)
+                    } else {
+                        stt.transcribe_segments(
+                            &audio_16k,
+                            &segments,
+                            lang.as_deref(),
+                        )
+                    }
                 } else {
                     Err("STT not initialized".into())
                 };
                 let _ = reply.send(result);
             }
-            AudioCommand::Synthesize { text, reply } => {
+            AudioCommand::Synthesize { text, lang, reply } => {
                 let result = if let Some(ref mut tts) = s.tts {
-                    tts.synthesize(&text)
+                    tts.synthesize(&text, &lang)
                 } else {
                     Err("TTS not initialized".into())
                 };

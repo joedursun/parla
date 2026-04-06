@@ -86,7 +86,7 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, mode, topic, message_count, started_at
+                "SELECT id, mode, topic
                  FROM conversations ORDER BY started_at DESC LIMIT ?1",
             )
             .map_err(|e| format!("prepare: {e}"))?;
@@ -96,8 +96,6 @@ impl Db {
                     id: row.get(0)?,
                     mode: row.get(1)?,
                     topic: row.get(2)?,
-                    message_count: row.get(3)?,
-                    started_at: row.get(4)?,
                 })
             })
             .map_err(|e| format!("query: {e}"))?;
@@ -106,6 +104,51 @@ impl Db {
             out.push(r.map_err(|e| format!("row: {e}"))?);
         }
         Ok(out)
+    }
+
+    pub fn update_conversation_topic(
+        &self,
+        conversation_id: i64,
+        topic: &str,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET topic = ?1 WHERE id = ?2",
+            params![topic, conversation_id],
+        )
+        .map_err(|e| format!("update topic: {e}"))?;
+        Ok(())
+    }
+
+    /// Delete a conversation and its associated messages and corrections.
+    /// Nulls out vocabulary references but keeps vocab/flashcard rows.
+    pub fn delete_conversation(&self, conversation_id: i64) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        // Delete corrections (references both messages and conversations).
+        conn.execute(
+            "DELETE FROM corrections WHERE conversation_id = ?1",
+            params![conversation_id],
+        )
+        .map_err(|e| format!("delete corrections: {e}"))?;
+        // Delete messages.
+        conn.execute(
+            "DELETE FROM messages WHERE conversation_id = ?1",
+            params![conversation_id],
+        )
+        .map_err(|e| format!("delete messages: {e}"))?;
+        // Null out vocabulary back-references (vocab is shared, don't delete it).
+        conn.execute(
+            "UPDATE vocabulary SET first_seen_conversation_id = NULL WHERE first_seen_conversation_id = ?1",
+            params![conversation_id],
+        )
+        .map_err(|e| format!("null vocab refs: {e}"))?;
+        // Delete the conversation itself.
+        conn.execute(
+            "DELETE FROM conversations WHERE id = ?1",
+            params![conversation_id],
+        )
+        .map_err(|e| format!("delete conversation: {e}"))?;
+        Ok(())
     }
 
     pub fn update_conversation_counts(
@@ -142,6 +185,36 @@ impl Db {
         )
         .map_err(|e| format!("insert message: {e}"))?;
         Ok(conn.last_insert_rowid())
+    }
+
+    /// Fetch all messages for a given conversation, ordered chronologically.
+    pub fn get_messages_by_conversation(
+        &self,
+        conversation_id: i64,
+    ) -> Result<Vec<MessageRow>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT role, content, translation
+                 FROM messages
+                 WHERE conversation_id = ?1
+                 ORDER BY created_at ASC",
+            )
+            .map_err(|e| format!("prepare: {e}"))?;
+        let rows = stmt
+            .query_map(params![conversation_id], |row| {
+                Ok(MessageRow {
+                    role: row.get(0)?,
+                    content: row.get(1)?,
+                    translation: row.get(2)?,
+                })
+            })
+            .map_err(|e| format!("query: {e}"))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|e| format!("row: {e}"))?);
+        }
+        Ok(out)
     }
 
     // ── Corrections ──────────────────────────────────────────────────────
@@ -234,6 +307,63 @@ impl Db {
         .map_err(|e| format!("count due: {e}"))
     }
 
+    /// Fetch all flashcards joined with their vocabulary data.
+    pub fn get_all_flashcards(&self) -> Result<Vec<FlashcardListRow>, String> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_iso();
+        let mut stmt = conn
+            .prepare(
+                "SELECT v.target_text, v.native_text, v.pronunciation,
+                        v.example_sentence_target, v.example_sentence_native,
+                        f.status, f.due_date, f.review_count, v.topic
+                 FROM flashcards f
+                 JOIN vocabulary v ON v.id = f.vocabulary_id
+                 ORDER BY f.created_at DESC",
+            )
+            .map_err(|e| format!("prepare: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(FlashcardListRowRaw {
+                    word: row.get(0)?,
+                    meaning: row.get(1)?,
+                    pronunciation: row.get(2)?,
+                    example_target: row.get(3)?,
+                    example_native: row.get(4)?,
+                    status: row.get(5)?,
+                    due_date: row.get(6)?,
+                    review_count: row.get(7)?,
+                    topic: row.get(8)?,
+                })
+            })
+            .map_err(|e| format!("query: {e}"))?;
+        let mut out = Vec::new();
+        for r in rows {
+            let raw = r.map_err(|e| format!("row: {e}"))?;
+            let is_due = raw.due_date.as_str() <= now.as_str();
+            let display_status = if raw.status == "new" {
+                "New"
+            } else if is_due {
+                "Due"
+            } else if raw.status == "mature" {
+                "Mature"
+            } else {
+                "Learning"
+            };
+            out.push(FlashcardListRow {
+                word: raw.word,
+                meaning: raw.meaning,
+                pronunciation: raw.pronunciation,
+                example_target: raw.example_target,
+                example_native: raw.example_native,
+                status: display_status.to_string(),
+                due_date: raw.due_date,
+                review_count: raw.review_count,
+                topic: raw.topic,
+            });
+        }
+        Ok(out)
+    }
+
     // ── Recent vocabulary ────────────────────────────────────────────────
 
     pub fn recent_vocabulary(&self, limit: usize) -> Result<Vec<VocabRow>, String> {
@@ -308,18 +438,47 @@ pub struct NewVocabulary {
     pub conversation_id: Option<i64>,
 }
 
+pub struct MessageRow {
+    pub role: String,
+    pub content: String,
+    pub translation: Option<String>,
+}
+
 pub struct ConversationRow {
     pub id: i64,
     pub mode: String,
     pub topic: Option<String>,
-    pub message_count: i32,
-    pub started_at: String,
 }
 
 pub struct VocabRow {
     pub target_text: String,
     pub native_text: String,
     pub status: String,
+}
+
+/// Internal raw row before status computation.
+struct FlashcardListRowRaw {
+    word: String,
+    meaning: String,
+    pronunciation: Option<String>,
+    example_target: Option<String>,
+    example_native: Option<String>,
+    status: String,
+    due_date: String,
+    review_count: i32,
+    topic: String,
+}
+
+pub struct FlashcardListRow {
+    pub word: String,
+    pub meaning: String,
+    pub pronunciation: Option<String>,
+    pub example_target: Option<String>,
+    pub example_native: Option<String>,
+    pub status: String,
+    pub due_date: String,
+    pub review_count: i32,
+    pub topic: String,
 }
 
 fn now_iso() -> String {

@@ -8,11 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Sentence-boundary punctuation for Spanish/English/French/etc. Includes
-/// the inverted punctuation that starts Spanish exclamations, since those
-/// open a new sentence-level unit. A newline also counts.
+/// Sentence-boundary punctuation. Includes Latin and CJK terminators.
 fn is_sentence_terminator(c: char) -> bool {
-    matches!(c, '.' | '!' | '?' | '…')
+    matches!(c, '.' | '!' | '?' | '…' | '。' | '！' | '？')
 }
 
 /// Incremental parser for streamed LLM output. Feed it chunks of raw text;

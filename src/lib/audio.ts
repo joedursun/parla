@@ -41,8 +41,8 @@ export async function stopRecording(): Promise<StopRecordingResult> {
 	return invoke('stop_recording');
 }
 
-/** Stop recording, transcribe speech, and return transcription + recording info. */
-export async function stopRecordingAndTranscribe(): Promise<StopRecordingResult & { transcription: string }> {
+/** Stop recording, transcribe speech, and return transcription + translation + recording info. */
+export async function stopRecordingAndTranscribe(): Promise<StopRecordingResult & { transcription: string; translation: string }> {
 	return invoke('stop_recording_and_transcribe');
 }
 

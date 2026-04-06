@@ -13,12 +13,14 @@
 		conversationTurn,
 		resetConversation,
 		cancelGeneration,
+		loadConversation,
 		type ConversationTurnResult,
 		type NewVocabulary,
 		type GrammarNote,
 		type SuggestedResponse,
 	} from '$lib/conversation';
 	import { store } from '$lib/stores.svelte';
+	import { page } from '$app/state';
 
 	const userProfile = $derived(store.userProfile);
 	const currentLesson = $derived(store.currentLesson);
@@ -123,10 +125,10 @@
 		awaitingTutor = false;
 	}
 
-	async function sendStudentText(text: string) {
+	async function sendStudentText(text: string, translation: string = '') {
 		const trimmed = text.trim();
 		if (!trimmed) return;
-		liveMessages = [...liveMessages, { role: 'student', target: trimmed, translation: '' }];
+		liveMessages = [...liveMessages, { role: 'student', target: trimmed, translation }];
 		awaitingTutor = true;
 		streamingSentences = [];
 		try {
@@ -173,7 +175,7 @@
 			const result = await stopRecordingAndTranscribe();
 			lastRecording = result;
 			if (result.transcription && result.transcription.trim()) {
-				await sendStudentText(result.transcription);
+				await sendStudentText(result.transcription, result.translation || '');
 			}
 		} catch (e) {
 			console.error('Failed to process recording:', e);
@@ -202,6 +204,33 @@
 		correction?: { wrong: string; right: string; explain: string };
 		vocab?: { word: string; meaning: string };
 	};
+
+	// ── Load conversation by ID from query param ───────────────────
+	let loadedConversationId: string | null = $state(null);
+
+	$effect(() => {
+		const id = page.url.searchParams.get('id');
+		if (id && id !== loadedConversationId) {
+			loadedConversationId = id;
+			const numId = parseInt(id, 10);
+			if (!isNaN(numId)) {
+				loadConversation(numId).then((msgs) => {
+					liveMessages = msgs.map((m) => ({
+						role: m.role === 'student' ? 'student' as const : 'tutor' as const,
+						target: m.content,
+						translation: m.translation,
+					}));
+					contextVocab = [];
+					grammarNotes = [];
+					suggestions = [];
+					streamingSentences = [];
+					awaitingTutor = false;
+				}).catch((e) => {
+					console.error('Failed to load conversation:', e);
+				});
+			}
+		}
+	});
 
 	let messagesEl: HTMLDivElement | undefined = $state();
 

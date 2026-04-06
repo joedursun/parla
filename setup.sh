@@ -17,15 +17,14 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DATA_DIR="$HOME/Library/Application Support/com.parla.app"
 MODELS_DIR="$APP_DATA_DIR/models"
-VOICES_DIR="$MODELS_DIR/voices"
 TMP_DIR="$REPO_DIR/tmp"
 HF_CACHE_DIR="$HOME/.cache/huggingface/hub"
 
 # Model URLs
 SILERO_VAD_URL="https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx"
 WHISPER_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
-KOKORO_MODEL_URL="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/onnx/model.onnx"
-KOKORO_VOICE_URL="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices/af_heart.bin"
+# Piper TTS voices (one per language, medium quality, ~63 MB each)
+PIPER_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main"
 # Gemma 4 26B A4B (MoE: 25.2B total, 3.8B active) at Q4_K_M — ~15.5 GB
 GEMMA_URL="https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/gemma-4-26B-A4B-it-Q4_K_M.gguf"
 GEMMA_FILE="gemma-4-26B-A4B-it-Q4_K_M.gguf"
@@ -84,7 +83,8 @@ echo ""
 echo "  Models dir: $MODELS_DIR"
 echo ""
 
-mkdir -p "$MODELS_DIR" "$VOICES_DIR" "$TMP_DIR"
+PIPER_DIR="$MODELS_DIR/piper"
+mkdir -p "$MODELS_DIR" "$PIPER_DIR" "$TMP_DIR"
 
 # ── 1. Silero VAD ──────────────────────────────────────────────────────────
 
@@ -98,11 +98,27 @@ echo "── Whisper STT ──"
 download_if_missing "$WHISPER_URL" "$MODELS_DIR/ggml-small.bin" "ggml-small.bin (~466 MB)"
 echo ""
 
-# ── 3. Kokoro TTS ──────────────────────────────────────────────────────────
+# ── 3. Piper TTS voices ────────────────────────────────────────────────────
 
-echo "── Kokoro TTS ──"
-download_if_missing "$KOKORO_MODEL_URL" "$MODELS_DIR/kokoro-v0_19.onnx" "kokoro model (~330 MB)"
-download_if_missing "$KOKORO_VOICE_URL" "$VOICES_DIR/af_heart.bin" "af_heart voice (~520 KB)"
+echo "── Piper TTS voices ──"
+
+download_piper_voice() {
+    local family="$1" locale="$2" speaker="$3" quality="$4"
+    local filename="${locale}-${speaker}-${quality}"
+    local url_base="${PIPER_BASE}/${family}/${locale}/${speaker}/${quality}"
+    download_if_missing "${url_base}/${filename}.onnx"      "$PIPER_DIR/${filename}.onnx"      "${filename}.onnx (~63 MB)"
+    download_if_missing "${url_base}/${filename}.onnx.json"  "$PIPER_DIR/${filename}.onnx.json"  "${filename}.onnx.json"
+}
+
+download_piper_voice en en_US lessac   medium   # English
+download_piper_voice es es_ES davefx   medium   # Spanish
+download_piper_voice fr fr_FR siwis    medium   # French
+download_piper_voice de de_DE thorsten medium   # German
+download_piper_voice tr tr_TR dfki     medium   # Turkish
+download_piper_voice zh zh_CN huayan   medium   # Mandarin
+
+info "Korean: no Piper voice available — will use macOS Yuna voice"
+
 echo ""
 
 # ── 4. Gemma LLM ───────────────────────────────────────────────────────────
@@ -197,8 +213,9 @@ echo "── System checks ──"
 if command -v espeak-ng &>/dev/null; then
     ok "espeak-ng found ($(espeak-ng --version 2>&1 | head -1))"
 else
-    warn "espeak-ng not found — Kokoro TTS will fall back to macOS say"
-    info "Install with: brew install espeak-ng"
+    # espeak-ng is bundled via espeak-rs at compile time, but the system
+    # binary is handy for debugging phonemization.
+    info "espeak-ng not found (optional — bundled in the app binary)"
 fi
 
 echo ""

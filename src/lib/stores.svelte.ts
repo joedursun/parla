@@ -147,3 +147,7 @@ export function setRecentConversations(c: RecentConversation[]) {
 export function setFlashcardsDueCount(n: number) {
 	store.flashcardsDueCount = n;
 }
+
+export function setFlashcards(f: FlashcardSummary[]) {
+	store.flashcards = f;
+}

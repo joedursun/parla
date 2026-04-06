@@ -14,6 +14,23 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, RunEvent, State};
+use tts::{detect_language_from_text, language_name_to_code};
+
+/// The user's target language code (e.g. "ko", "es"), shared across threads.
+#[derive(Clone)]
+struct TargetLanguage(Arc<Mutex<String>>);
+
+impl TargetLanguage {
+    fn new(code: &str) -> Self {
+        Self(Arc::new(Mutex::new(code.to_string())))
+    }
+    fn get(&self) -> String {
+        self.0.lock().unwrap().clone()
+    }
+    fn set(&self, code: &str) {
+        *self.0.lock().unwrap() = code.to_string();
+    }
+}
 
 /// Resolve the models directory: <app_data_dir>/models/
 fn models_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -59,16 +76,19 @@ fn find_gemma_model(dir: &Path) -> Result<PathBuf, String> {
 
 /// Find a Whisper model file in the given directory.
 fn find_whisper_model(dir: &Path) -> Result<PathBuf, String> {
+    // Prefer multilingual models over .en (English-only) variants since we
+    // need to transcribe in the student's target language.
     let patterns = [
-        "ggml-small.bin",
-        "ggml-small.en.bin",
-        "ggml-base.en.bin",
-        "ggml-base.bin",
-        "ggml-medium.bin",
-        "ggml-medium.en.bin",
         "ggml-large-v3-turbo.bin",
         "ggml-large-v3.bin",
+        "ggml-medium.bin",
+        "ggml-small.bin",
+        "ggml-base.bin",
         "ggml-tiny.bin",
+        // English-only fallbacks (will only transcribe English)
+        "ggml-small.en.bin",
+        "ggml-base.en.bin",
+        "ggml-medium.en.bin",
     ];
     for name in patterns {
         let path = dir.join(name);
@@ -114,8 +134,13 @@ async fn stop_recording(state: State<'_, AudioState>) -> Result<StopRecordingRes
 #[tauri::command]
 async fn stop_recording_and_transcribe(
     state: State<'_, AudioState>,
+    target_lang: State<'_, TargetLanguage>,
 ) -> Result<TranscriptionResult, String> {
     let state = state.inner().clone();
+    let lang_code = target_lang.get();
+    // Map our language code to Whisper's expected code
+    let whisper_lang = whisper_lang_code(&lang_code);
+
     let result = tokio::task::spawn_blocking(move || {
         let rec = state.stop_recording()?;
         let segments: Vec<(usize, usize)> = rec
@@ -123,20 +148,47 @@ async fn stop_recording_and_transcribe(
             .iter()
             .map(|s| (s.start_sample, s.end_sample))
             .collect();
-        let transcription = state.transcribe(&rec.samples, &segments).unwrap_or_default();
-        Ok::<_, String>((rec, transcription))
+        // Transcribe in the target language
+        let transcription = state
+            .transcribe(&rec.samples, &segments, Some(&whisper_lang))
+            .unwrap_or_default();
+        // Also translate to English for the subtitle
+        let translation = if whisper_lang != "en" {
+            state.translate(&rec.samples, &segments).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        Ok::<_, String>((rec, transcription, translation))
     })
     .await
     .map_err(|e| format!("{e}"))??;
 
-    let (rec, transcription) = result;
+    let (rec, transcription, translation) = result;
     let recording = make_recording_result(&rec);
     Ok(TranscriptionResult {
         duration_ms: recording.duration_ms,
         sample_count: recording.sample_count,
         speech_segments: recording.speech_segments,
         transcription,
+        translation,
     })
+}
+
+/// Map our internal language codes to Whisper language codes.
+fn whisper_lang_code(lang: &str) -> String {
+    match lang {
+        "zh" => "zh".to_string(),
+        "ko" => "ko".to_string(),
+        "ja" => "ja".to_string(),
+        "en" => "en".to_string(),
+        "es" => "es".to_string(),
+        "fr" => "fr".to_string(),
+        "de" => "de".to_string(),
+        "tr" => "tr".to_string(),
+        "it" => "it".to_string(),
+        "pt" => "pt".to_string(),
+        other => other.to_string(),
+    }
 }
 
 #[tauri::command]
@@ -154,12 +206,19 @@ async fn loopback_test(state: State<'_, AudioState>) -> Result<StopRecordingResu
 }
 
 #[tauri::command]
-async fn speak_text(state: State<'_, AudioState>, text: String) -> Result<(), String> {
+async fn speak_text(
+    state: State<'_, AudioState>,
+    target_lang: State<'_, TargetLanguage>,
+    text: String,
+) -> Result<(), String> {
     let state = state.inner().clone();
+    let lang = detect_language_from_text(&text)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| target_lang.get());
     tokio::task::spawn_blocking(move || {
-        let samples = state.synthesize(&text)?;
-        if !samples.is_empty() {
-            state.play_audio(samples, 24000)?;
+        let output = state.synthesize(&text, &lang)?;
+        if !output.samples.is_empty() {
+            state.play_audio(output.samples, output.sample_rate)?;
         }
         Ok(())
     })
@@ -237,11 +296,15 @@ async fn get_profile(db: State<'_, Db>) -> Result<Option<ProfileResult>, String>
 async fn create_profile(
     db: State<'_, Db>,
     history: State<'_, ConversationHistory>,
+    target_lang_state: State<'_, TargetLanguage>,
     native_language: String,
     target_language: String,
     cefr_level: String,
     goals: Vec<String>,
 ) -> Result<ProfileResult, String> {
+    // Update the TTS target language immediately.
+    target_lang_state.set(language_name_to_code(&target_language));
+
     let db = db.inner().clone();
     let history = history.inner().clone();
     let tl = target_language.clone();
@@ -296,6 +359,143 @@ async fn get_recent_conversations(
     .map_err(|e| format!("{e}"))?
 }
 
+#[tauri::command]
+async fn rename_conversation(
+    db: State<'_, Db>,
+    app: tauri::AppHandle,
+    conversation_id: i64,
+    title: String,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        db.update_conversation_topic(conversation_id, &title)?;
+        // Re-emit sidebar data.
+        if let Ok(convs) = db.get_recent_conversations(20) {
+            let list: Vec<serde_json::Value> = convs
+                .into_iter()
+                .map(|r| {
+                    let t = r
+                        .topic
+                        .unwrap_or_else(|| format!("{} conversation", r.mode));
+                    serde_json::json!({ "id": r.id.to_string(), "title": t })
+                })
+                .collect();
+            let _ = app.emit("recent-conversations", list);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("{e}"))?
+}
+
+#[tauri::command]
+async fn delete_conversation(
+    db: State<'_, Db>,
+    history: State<'_, ConversationHistory>,
+    app: tauri::AppHandle,
+    conversation_id: i64,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    let history = history.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        db.delete_conversation(conversation_id)?;
+        // If the deleted conversation is the active one, reset history.
+        if history.get_conversation_id() == Some(conversation_id) {
+            history.clear();
+        }
+        // Re-emit sidebar data.
+        if let Ok(convs) = db.get_recent_conversations(20) {
+            let list: Vec<serde_json::Value> = convs
+                .into_iter()
+                .map(|r| {
+                    let t = r
+                        .topic
+                        .unwrap_or_else(|| format!("{} conversation", r.mode));
+                    serde_json::json!({ "id": r.id.to_string(), "title": t })
+                })
+                .collect();
+            let _ = app.emit("recent-conversations", list);
+        }
+        // Re-emit flashcard due count (deletions may affect it indirectly).
+        let due = db.flashcards_due_count().unwrap_or(0);
+        let _ = app.emit("flashcards-due-count", due);
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("{e}"))?
+}
+
+// ── Flashcard commands ───────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_flashcards(db: State<'_, Db>) -> Result<Vec<FlashcardResult>, String> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let rows = db.get_all_flashcards()?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let dots: Vec<bool> = (0..5).map(|i| i < r.review_count.min(5)).collect();
+                FlashcardResult {
+                    word: r.word,
+                    meaning: r.meaning,
+                    pronunciation: r.pronunciation.unwrap_or_default(),
+                    example_target: r.example_target.unwrap_or_default(),
+                    example_native: r.example_native.unwrap_or_default(),
+                    source: r.topic,
+                    status: r.status,
+                    next_review: r.due_date,
+                    dots,
+                }
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| format!("{e}"))?
+}
+
+// ── Conversation loading ─────────────────────────────────────────────
+
+/// Load a previous conversation from the database, restoring its messages
+/// into the in-memory ConversationHistory so the user can continue it.
+#[tauri::command]
+async fn load_conversation(
+    db: State<'_, Db>,
+    history: State<'_, ConversationHistory>,
+    conversation_id: i64,
+) -> Result<Vec<LoadedMessage>, String> {
+    let db = db.inner().clone();
+    let history = history.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let messages = db.get_messages_by_conversation(conversation_id)?;
+
+        // Reset and repopulate ConversationHistory.
+        history.clear();
+        history.set_conversation_id(conversation_id);
+
+        let mut result = Vec::new();
+        for msg in &messages {
+            let chat_msg = match msg.role.as_str() {
+                "student" => ChatMessage::user(msg.content.clone()),
+                "tutor" => ChatMessage::assistant(msg.content.clone()),
+                _ => continue,
+            };
+            history.push(chat_msg);
+            history.increment_messages();
+
+            result.push(LoadedMessage {
+                role: msg.role.clone(),
+                content: msg.content.clone(),
+                translation: msg.translation.clone().unwrap_or_default(),
+            });
+        }
+
+        Ok(result)
+    })
+    .await
+    .map_err(|e| format!("{e}"))?
+}
+
 /// Reset the conversation history for the current session.
 #[tauri::command]
 async fn reset_conversation(history: State<'_, ConversationHistory>) -> Result<(), String> {
@@ -314,6 +514,7 @@ async fn conversation_turn(
     llm: State<'_, LlmState>,
     history: State<'_, ConversationHistory>,
     cancel: State<'_, CancelFlag>,
+    target_lang: State<'_, TargetLanguage>,
     student_text: String,
 ) -> Result<ConversationTurnResult, String> {
     let student_text = student_text.trim().to_string();
@@ -334,9 +535,11 @@ async fn conversation_turn(
     history.inner().push(user_msg);
 
     let llm = llm.inner().clone();
+    let llm_for_db = llm.clone();
     let audio_handle = audio.inner().clone();
     let app_handle = app.clone();
     let cancel_for_llm = cancel_flag.clone();
+    let tts_lang = target_lang.get();
 
     // Do the heavy work on a blocking task so we don't hog the tokio runtime.
     let result = tokio::task::spawn_blocking(move || -> Result<ConversationTurnResult, String> {
@@ -351,9 +554,12 @@ async fn conversation_turn(
                 if cancel_for_llm.load(Ordering::Relaxed) {
                     break;
                 }
-                if let Ok(samples) = audio_handle.synthesize(&sentence) {
-                    if !samples.is_empty() {
-                        let _ = audio_handle.play_audio(samples, 24000);
+                // Detect language from text script, fall back to the user's target language
+                let lang = detect_language_from_text(&sentence)
+                    .unwrap_or(&tts_lang);
+                if let Ok(output) = audio_handle.synthesize(&sentence, lang) {
+                    if !output.samples.is_empty() {
+                        let _ = audio_handle.play_audio(output.samples, output.sample_rate);
                     }
                 }
                 let _ = app_handle.emit("tutor-sentence", &sentence);
@@ -432,6 +638,7 @@ async fn conversation_turn(
                 &student_text_for_db,
                 &result_for_db,
                 &app_for_db,
+                &llm_for_db,
             ) {
                 eprintln!("[db] persist_turn failed: {e}");
             }
@@ -450,6 +657,47 @@ async fn cancel_generation(cancel: State<'_, CancelFlag>) -> Result<(), String> 
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+/// Generate a short conversation title via the LLM.
+fn generate_conversation_title(
+    llm: &LlmState,
+    student_text: &str,
+    tutor_text: &str,
+) -> Option<String> {
+    let messages = vec![
+        ChatMessage::system(
+            "Generate a short title (3-5 words) for this language learning conversation. \
+             Reply with ONLY the title, nothing else. No quotes, no punctuation at the end.",
+        ),
+        ChatMessage::user(format!(
+            "Student: {}\nTutor: {}",
+            student_text, tutor_text
+        )),
+    ];
+    let cancel = Arc::new(AtomicBool::new(false));
+    let rx = llm.generate(messages, cancel).ok()?;
+    let mut full_text = String::new();
+    loop {
+        match rx.recv() {
+            Ok(GenChunk::Text(t)) => full_text.push_str(&t),
+            Ok(GenChunk::Done { full_text: ft }) => {
+                full_text = ft;
+                break;
+            }
+            Ok(GenChunk::Error(_)) | Err(_) => break,
+        }
+    }
+    let title = full_text
+        .trim()
+        .trim_matches('"')
+        .trim_matches('*')
+        .to_string();
+    if title.is_empty() || title.len() > 100 {
+        None
+    } else {
+        Some(title)
+    }
+}
+
 /// Persist one conversation turn (student + tutor messages, corrections,
 /// vocabulary, flashcards) to SQLite. Called in a background task so it
 /// never blocks the voice loop.
@@ -459,14 +707,15 @@ fn persist_turn(
     student_text: &str,
     result: &ConversationTurnResult,
     app: &tauri::AppHandle,
+    llm: &LlmState,
 ) -> Result<(), String> {
     // Ensure we have a conversation row.
-    let conv_id = match history.get_conversation_id() {
-        Some(id) => id,
+    let (conv_id, is_new) = match history.get_conversation_id() {
+        Some(id) => (id, false),
         None => {
             let id = db.create_conversation("free", None)?;
             history.set_conversation_id(id);
-            id
+            (id, true)
         }
     };
 
@@ -552,6 +801,32 @@ fn persist_turn(
         let _ = app.emit("recent-vocabulary", vocab_list);
     }
 
+    // Generate a title for new conversations (first turn only).
+    if is_new {
+        let tutor_text = if result.tutor_native.is_empty() {
+            &result.tutor_target
+        } else {
+            &result.tutor_native
+        };
+        match generate_conversation_title(llm, student_text, tutor_text) {
+            Some(title) => {
+                let _ = db.update_conversation_topic(conv_id, &title);
+            }
+            None => {
+                // Fallback: truncate student message.
+                let fallback = if student_text.len() > 40 {
+                    let end = student_text[..40]
+                        .rfind(' ')
+                        .unwrap_or(40);
+                    format!("{}…", &student_text[..end])
+                } else {
+                    student_text.to_string()
+                };
+                let _ = db.update_conversation_topic(conv_id, &fallback);
+            }
+        }
+    }
+
     // Emit updated recent conversations for the sidebar.
     if let Ok(convs) = db.get_recent_conversations(20) {
         let list: Vec<serde_json::Value> = convs
@@ -609,6 +884,8 @@ struct TranscriptionResult {
     sample_count: usize,
     speech_segments: Vec<SpeechSegmentResult>,
     transcription: String,
+    /// English translation (empty if the target language is already English).
+    translation: String,
 }
 
 #[derive(serde::Serialize)]
@@ -646,6 +923,27 @@ struct ProfileResult {
 struct RecentConversationResult {
     id: String,
     title: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct LoadedMessage {
+    role: String,
+    content: String,
+    translation: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FlashcardResult {
+    word: String,
+    meaning: String,
+    pronunciation: String,
+    example_target: String,
+    example_native: String,
+    source: String,
+    status: String,
+    next_review: String,
+    dots: Vec<bool>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -764,6 +1062,7 @@ pub fn run() {
         .manage(LlmState::new())
         .manage(ConversationHistory::new())
         .manage(CancelFlag::new())
+        .manage(TargetLanguage::new("es")) // default until profile loads
         .setup(|app| {
             let handle = app.handle().clone();
             let state: AudioState = app.state::<AudioState>().inner().clone();
@@ -782,7 +1081,7 @@ pub fn run() {
                 Db::open(&db_path).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
             app.manage(db.clone());
 
-            // If a profile exists, set the system prompt from it.
+            // If a profile exists, set the system prompt and target language from it.
             if let Ok(Some(profile)) = db.get_profile() {
                 let goals: Vec<String> =
                     serde_json::from_str(&profile.goals_json).unwrap_or_default();
@@ -797,6 +1096,8 @@ pub fn run() {
                 );
                 let history: tauri::State<ConversationHistory> = app.state();
                 history.set_system_prompt(prompt);
+                let tl: tauri::State<TargetLanguage> = app.state();
+                tl.set(language_name_to_code(&profile.target_language));
                 println!("[parla] loaded profile: {} -> {}", profile.native_language, profile.target_language);
             }
 
@@ -830,7 +1131,7 @@ pub fn run() {
                     println!("[parla] VAD model not found, skipping");
                 }
 
-                // TTS (macOS say is instant; Kokoro ONNX ~1-2s)
+                // TTS (Piper ONNX voices, macOS say fallback for unsupported languages)
                 println!("[parla] loading TTS...");
                 let tts_dir = data_dir.join("tts");
                 match state.init_tts(tts_dir) {
@@ -882,6 +1183,10 @@ pub fn run() {
             get_profile,
             create_profile,
             get_recent_conversations,
+            rename_conversation,
+            delete_conversation,
+            get_flashcards,
+            load_conversation,
             conversation_turn,
             reset_conversation,
             cancel_generation,
