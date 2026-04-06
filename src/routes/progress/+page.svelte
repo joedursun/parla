@@ -1,148 +1,162 @@
 <script lang="ts">
-	const skills = [
-		{ icon: '\u{1F4D6}', name: 'Reading', pct: 72, color: 'success' },
-		{ icon: '\u{1F3A7}', name: 'Listening', pct: 58, color: '' },
-		{ icon: '\u{270D}\u{FE0F}', name: 'Writing', pct: 65, color: 'accent' },
-		{ icon: '\u{1F5E3}\u{FE0F}', name: 'Speaking', pct: 45, color: 'warning' },
-	];
+	import {
+		userProfile,
+		skills,
+		weakAreas,
+		vocabCategories,
+		grammarConcepts,
+		levelProgress,
+	} from '$lib/stores.svelte';
 
-	const weakAreas = [
-		{ name: 'Verb conjugation (present)', accuracy: '42%' },
-		{ name: 'Gender agreement', accuracy: '51%' },
-		{ name: 'Question formation', accuracy: '55%' },
-		{ name: 'Pronunciation: rr', accuracy: '38%' },
-	];
-
-	const vocabCategories = [
-		{ name: 'Greetings', mastered: 85, learning: 10, newPct: 5, count: 32 },
-		{ name: 'Numbers', mastered: 70, learning: 20, newPct: 10, count: 45 },
-		{ name: 'Directions', mastered: 55, learning: 30, newPct: 15, count: 38 },
-		{ name: 'Food & Dining', mastered: 25, learning: 35, newPct: 40, count: 52 },
-		{ name: 'Daily Objects', mastered: 15, learning: 15, newPct: 70, count: 20 },
-	];
-
-	const grammarConcepts = [
-		{ name: 'Subject pronouns', desc: 'yo, tu, el/ella, nosotros...', status: 'mastered' as const },
-		{ name: 'Ser vs Estar (basics)', desc: 'Permanent vs temporary states', status: 'mastered' as const },
-		{ name: 'Definite & indefinite articles', desc: 'el/la/los/las, un/una/unos/unas', status: 'mastered' as const },
-		{ name: 'Present tense conjugation', desc: 'Regular -ar, -er, -ir verbs', status: 'learning' as const },
-		{ name: 'Gender & number agreement', desc: 'Adjective-noun agreement', status: 'learning' as const },
-		{ name: 'Question words', desc: 'Que, cual, donde, cuando, como', status: 'learning' as const },
-		{ name: 'Gustar & similar verbs', desc: 'Verbs that work "backwards"', status: 'upcoming' as const },
-		{ name: 'Possessive adjectives', desc: 'mi, tu, su, nuestro...', status: 'upcoming' as const },
-	];
+	const hasData = $derived(
+		skills.length > 0 || weakAreas.length > 0 || vocabCategories.length > 0 || grammarConcepts.length > 0 || levelProgress.level !== ''
+	);
 </script>
 
-<div class="page-body">
-	<!-- Level Hero -->
-	<div class="level-hero">
-		<div class="level-ring">
-			<svg viewBox="0 0 140 140">
-				<circle class="ring-bg" cx="70" cy="70" r="60"/>
-				<circle class="ring-fill" cx="70" cy="70" r="60"/>
-			</svg>
-			<div class="ring-label">
-				<span class="ring-level">A1</span>
-				<span class="ring-sublabel">Beginner</span>
-			</div>
-		</div>
-		<div class="level-info">
-			<h2>65% through A1 &mdash; Beginner</h2>
-			<p>You're building a solid foundation! You can greet people, ask basic questions, order food, and navigate simple conversations. Keep going &mdash; A2 is within reach.</p>
-			<div class="level-milestones">
-				<div class="milestone done">&#x2713; Greetings</div>
-				<div class="milestone done">&#x2713; Numbers</div>
-				<div class="milestone done">&#x2713; Directions</div>
-				<div class="milestone">&#x25CB; Food &amp; Dining</div>
-				<div class="milestone">&#x25CB; Shopping</div>
-			</div>
-		</div>
+{#if !hasData}
+	<div class="empty-page">
+		<div class="empty-icon">&#x1F4CA;</div>
+		<h2>No progress yet</h2>
+		<p>Start a conversation with your tutor to begin tracking your skills, vocabulary, and grammar mastery.</p>
+		<a class="btn btn-primary" href="/conversation">Start learning</a>
 	</div>
-
-	<!-- Skills -->
-	<div class="skills-section">
-		<h3>Skills Breakdown</h3>
-		<div class="skills-grid">
-			{#each skills as skill}
-				<div class="skill-card">
-					<div class="skill-icon">{skill.icon}</div>
-					<div class="skill-name">{skill.name}</div>
-					<div class="skill-level">A1 &middot; Beginner</div>
-					<div class="progress-bar">
-						<div class="fill {skill.color}" style="width: {skill.pct}%"></div>
+{:else}
+	<div class="page-body">
+		<!-- Level Hero -->
+		{#if levelProgress.level}
+			<div class="level-hero">
+				<div class="level-ring">
+					<svg viewBox="0 0 140 140">
+						<circle class="ring-bg" cx="70" cy="70" r="60"/>
+						<circle class="ring-fill" cx="70" cy="70" r="60" style="stroke-dashoffset: {377 - (377 * levelProgress.pct / 100)}"/>
+					</svg>
+					<div class="ring-label">
+						<span class="ring-level">{levelProgress.level}</span>
+						<span class="ring-sublabel">{levelProgress.label}</span>
 					</div>
-					<div class="skill-pct">{skill.pct}%</div>
 				</div>
-			{/each}
-		</div>
-	</div>
-
-	<!-- Weak Areas -->
-	<div class="weak-areas">
-		<h3>&#x1F4A1; Areas to Focus On</h3>
-		<p>These are concepts where your accuracy has been below 60% recently. Extra practice here will accelerate your progress.</p>
-		<div class="weak-list">
-			{#each weakAreas as area}
-				<div class="weak-item">
-					<span>{area.name}</span>
-					<span class="accuracy">{area.accuracy}</span>
-				</div>
-			{/each}
-		</div>
-	</div>
-
-	<!-- Vocab & Grammar -->
-	<div class="progress-grid">
-		<div class="vocab-breakdown">
-			<h3>Vocabulary by Topic</h3>
-			<div class="vocab-summary">
-				<div class="vocab-stat mastered"><div class="v-num">98</div><div class="v-label">Mastered</div></div>
-				<div class="vocab-stat learning"><div class="v-num">54</div><div class="v-label">Learning</div></div>
-				<div class="vocab-stat new"><div class="v-num">35</div><div class="v-label">New</div></div>
-			</div>
-			<div class="category-list">
-				{#each vocabCategories as cat}
-					<div class="category-item">
-						<span class="category-name">{cat.name}</span>
-						<div class="category-bar">
-							<div class="seg-mastered" style="width:{cat.mastered}%"></div>
-							<div class="seg-learning" style="width:{cat.learning}%"></div>
-							<div class="seg-new" style="width:{cat.newPct}%"></div>
+				<div class="level-info">
+					<h2>{levelProgress.pct}% through {levelProgress.level} &mdash; {levelProgress.label}</h2>
+					{#if levelProgress.description}
+						<p>{levelProgress.description}</p>
+					{/if}
+					{#if levelProgress.milestones.length > 0}
+						<div class="level-milestones">
+							{#each levelProgress.milestones as m}
+								<div class="milestone" class:done={m.done}>
+									{m.done ? '\u2713' : '\u25CB'} {m.name}
+								</div>
+							{/each}
 						</div>
-						<span class="category-count">{cat.count}</span>
-					</div>
-				{/each}
-			</div>
-		</div>
-
-		<div class="grammar-progress">
-			<h3>Grammar Concepts</h3>
-			{#each grammarConcepts as concept}
-				<div class="grammar-item">
-					<div class="grammar-status {concept.status}">
-						{#if concept.status === 'mastered'}&#x2713;{:else if concept.status === 'learning'}&#x25CB;{:else}&#x2014;{/if}
-					</div>
-					<div class="grammar-info">
-						<div class="grammar-name">{concept.name}</div>
-						<div class="grammar-desc">{concept.desc}</div>
-					</div>
-					<span class="tag" class:tag-success={concept.status === 'mastered'} class:tag-warning={concept.status === 'learning'} class:tag-muted={concept.status === 'upcoming'}>
-						{concept.status === 'upcoming' ? 'Upcoming' : concept.status === 'mastered' ? 'Mastered' : 'Learning'}
-					</span>
+					{/if}
 				</div>
-			{/each}
-		</div>
+			</div>
+		{/if}
+
+		<!-- Skills -->
+		{#if skills.length > 0}
+			<div class="skills-section">
+				<h3>Skills Breakdown</h3>
+				<div class="skills-grid">
+					{#each skills as skill}
+						<div class="skill-card">
+							<div class="skill-icon">{skill.icon}</div>
+							<div class="skill-name">{skill.name}</div>
+							{#if userProfile}
+								<div class="skill-level">{userProfile.level} &middot; {userProfile.levelLabel}</div>
+							{/if}
+							<div class="progress-bar">
+								<div class="fill {skill.color}" style="width: {skill.pct}%"></div>
+							</div>
+							<div class="skill-pct">{skill.pct}%</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
+		<!-- Weak Areas -->
+		{#if weakAreas.length > 0}
+			<div class="weak-areas">
+				<h3>&#x1F4A1; Areas to Focus On</h3>
+				<p>These are concepts where your accuracy has been below 60% recently. Extra practice here will accelerate your progress.</p>
+				<div class="weak-list">
+					{#each weakAreas as area}
+						<div class="weak-item">
+							<span>{area.name}</span>
+							<span class="accuracy">{area.accuracy}</span>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
+		<!-- Vocab & Grammar -->
+		{#if vocabCategories.length > 0 || grammarConcepts.length > 0}
+			<div class="progress-grid">
+				{#if vocabCategories.length > 0}
+					<div class="vocab-breakdown">
+						<h3>Vocabulary by Topic</h3>
+						{#if levelProgress.totalMastered > 0 || levelProgress.totalLearning > 0 || levelProgress.totalNew > 0}
+							<div class="vocab-summary">
+								<div class="vocab-stat mastered"><div class="v-num">{levelProgress.totalMastered}</div><div class="v-label">Mastered</div></div>
+								<div class="vocab-stat learning"><div class="v-num">{levelProgress.totalLearning}</div><div class="v-label">Learning</div></div>
+								<div class="vocab-stat new"><div class="v-num">{levelProgress.totalNew}</div><div class="v-label">New</div></div>
+							</div>
+						{/if}
+						<div class="category-list">
+							{#each vocabCategories as cat}
+								<div class="category-item">
+									<span class="category-name">{cat.name}</span>
+									<div class="category-bar">
+										<div class="seg-mastered" style="width:{cat.mastered}%"></div>
+										<div class="seg-learning" style="width:{cat.learning}%"></div>
+										<div class="seg-new" style="width:{cat.newPct}%"></div>
+									</div>
+									<span class="category-count">{cat.count}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if grammarConcepts.length > 0}
+					<div class="grammar-progress">
+						<h3>Grammar Concepts</h3>
+						{#each grammarConcepts as concept}
+							<div class="grammar-item">
+								<div class="grammar-status {concept.status}">
+									{#if concept.status === 'mastered'}&#x2713;{:else if concept.status === 'learning'}&#x25CB;{:else}&#x2014;{/if}
+								</div>
+								<div class="grammar-info">
+									<div class="grammar-name">{concept.name}</div>
+									<div class="grammar-desc">{concept.desc}</div>
+								</div>
+								<span class="tag" class:tag-success={concept.status === 'mastered'} class:tag-warning={concept.status === 'learning'} class:tag-muted={concept.status === 'upcoming'}>
+									{concept.status === 'upcoming' ? 'Upcoming' : concept.status === 'mastered' ? 'Mastered' : 'Learning'}
+								</span>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		{/if}
 	</div>
-</div>
+{/if}
 
 <style>
+	.empty-page { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-md); color: var(--text-secondary); text-align: center; padding: var(--space-2xl); }
+	.empty-icon { font-size: 3rem; margin-bottom: var(--space-sm); }
+	.empty-page h2 { color: var(--text); }
+	.empty-page p { max-width: 400px; font-size: 0.9375rem; line-height: 1.6; }
+
 	.page-body { padding: var(--space-xl); max-width: 1100px; margin: 0 auto; }
 
 	.level-hero { background: linear-gradient(135deg, var(--primary), var(--primary-light)); border-radius: var(--radius-xl); padding: var(--space-xl) var(--space-2xl); color: white; display: flex; align-items: center; gap: var(--space-2xl); margin-bottom: var(--space-xl); }
 	.level-ring { position: relative; width: 140px; height: 140px; flex-shrink: 0; }
 	.level-ring svg { width: 140px; height: 140px; transform: rotate(-90deg); }
 	:global(.ring-bg) { fill: none; stroke: rgba(255,255,255,0.2); stroke-width: 8; }
-	:global(.ring-fill) { fill: none; stroke: white; stroke-width: 8; stroke-linecap: round; stroke-dasharray: 377; stroke-dashoffset: 132; }
+	:global(.ring-fill) { fill: none; stroke: white; stroke-width: 8; stroke-linecap: round; stroke-dasharray: 377; }
 	.ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 	.ring-level { font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; }
 	.ring-sublabel { font-size: 0.75rem; opacity: 0.8; }

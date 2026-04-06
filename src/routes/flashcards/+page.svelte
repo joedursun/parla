@@ -1,113 +1,142 @@
 <script lang="ts">
+	import { flashcards, flashcardsDueCount } from '$lib/stores.svelte';
+
 	let flipped = $state(false);
+	let currentIndex = $state(0);
 
-	const cards = [
-		{ word: 'la cuenta', meaning: 'the bill / the check', pronunciation: '/la \u02C8kwen.ta/', example: { target: '\u00BFMe trae la cuenta, por favor?', native: 'Can you bring me the bill, please?' }, source: 'Ordering at a cafe \u00B7 Lesson 4', status: 'Mature' as const, tag: 'tag-success', nextReview: '5 days', dots: [true, true, true, true] },
-		{ word: 'me gustaria', meaning: 'I would like', pronunciation: '/me \u0263us.ta.\u02C8\u027Ei.a/', example: { target: 'Me gustaria un cafe, por favor.', native: 'I would like a coffee, please.' }, source: 'Lesson 4', status: 'Mature' as const, tag: 'tag-success', nextReview: '3 days', dots: [true, true, true, false] },
-		{ word: 'cuanto cuesta', meaning: 'how much does it cost', pronunciation: '/\u02C8kwan.to \u02C8kwes.ta/', example: { target: '\u00BFCuanto cuesta el cafe?', native: 'How much does the coffee cost?' }, source: 'Lesson 4', status: 'Learning' as const, tag: 'tag-secondary', nextReview: '10 min', dots: [true, false, false, false] },
-		{ word: 'el postre', meaning: 'dessert', pronunciation: '/el \u02C8pos.t\u027Ee/', example: { target: '\u00BFTienen algun postre?', native: 'Do you have any desserts?' }, source: 'Lesson 4', status: 'Due' as const, tag: 'tag-warning', nextReview: 'Due now', dots: [true, true, false, false] },
-		{ word: 'tortilla espanola', meaning: 'Spanish omelette', pronunciation: '', example: { target: 'Tenemos tortilla espanola hoy.', native: 'We have Spanish omelette today.' }, source: 'Lesson 4', status: 'New' as const, tag: 'tag-primary', nextReview: 'Not yet studied', dots: [false, false, false, false] },
-		{ word: 'la propina', meaning: 'the tip', pronunciation: '/la p\u027Eo.\u02C8pi.na/', example: { target: 'La propina no es obligatoria.', native: 'The tip is not mandatory.' }, source: 'Lesson 4', status: 'New' as const, tag: 'tag-primary', nextReview: 'Not yet studied', dots: [false, false, false, false] },
-	];
+	const current = $derived(flashcards.length > 0 ? flashcards[currentIndex] : null);
+	const reviewCount = $derived(flashcards.filter(c => c.status === 'Due' || c.status === 'Learning').length);
+	const newCount = $derived(flashcards.filter(c => c.status === 'New').length);
+	const matureCount = $derived(flashcards.filter(c => c.status === 'Mature').length);
+	const progressPct = $derived(flashcards.length > 0 ? Math.round(((currentIndex) / flashcards.length) * 100) : 0);
 
-	const current = cards[0];
+	const tagClass: Record<string, string> = {
+		Mature: 'tag-success',
+		Learning: 'tag-secondary',
+		Due: 'tag-warning',
+		New: 'tag-primary',
+	};
 </script>
 
-<div class="flashcard-layout">
-	<div class="review-header">
-		<div class="review-progress">
-			<div class="progress-label">
-				<span>Card 5 of 12</span>
-				<span>42% complete</span>
-			</div>
-			<div class="progress-bar" style="height:8px;">
-				<div class="fill" style="width: 42%"></div>
-			</div>
-		</div>
-		<div class="review-counts">
-			<div class="review-count new"><div class="count-num">3</div><div class="count-label">New</div></div>
-			<div class="review-count learning"><div class="count-num">4</div><div class="count-label">Learning</div></div>
-			<div class="review-count review"><div class="count-num">5</div><div class="count-label">Review</div></div>
-		</div>
+{#if flashcards.length === 0}
+	<div class="empty-page">
+		<div class="empty-icon">&#x1F0CF;</div>
+		<h2>No flashcards yet</h2>
+		<p>Start a conversation with your tutor to collect vocabulary. New words will automatically become flashcards for review.</p>
+		<a class="btn btn-primary" href="/conversation">Start a conversation</a>
 	</div>
-
-	<div class="card-stage">
-		<div class="flashcard-container">
-			<!-- svelte-ignore a11y_click_events_have_key_events -->
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="flashcard" class:flipped onclick={() => flipped = !flipped}>
-				<div class="card-face card-front">
-					<div class="card-type-badge"><span class="tag tag-primary">Vocabulary</span></div>
-					<div class="prompt-label">What does this mean?</div>
-					<div class="prompt-word">{current.word}</div>
-					<div class="prompt-context">"{current.example.target}"</div>
-					<button class="prompt-audio">&#x1F50A;</button>
-					<div class="flip-hint">Click or press Space to reveal</div>
+{:else}
+	<div class="flashcard-layout">
+		<div class="review-header">
+			<div class="review-progress">
+				<div class="progress-label">
+					<span>Card {currentIndex + 1} of {flashcards.length}</span>
+					<span>{progressPct}% complete</span>
 				</div>
-				<div class="card-face card-back">
-					<div class="card-type-badge"><span class="tag tag-primary">Vocabulary</span></div>
-					<div class="answer-word">{current.word}</div>
-					<div class="answer-pronunciation">{current.pronunciation}</div>
-					<div class="answer-meaning">{current.meaning}</div>
-					<div class="example-sentence">
-						<div class="ex-target">{current.example.target}</div>
-						<div class="ex-native">{current.example.native}</div>
-					</div>
-					<div class="answer-source">From: {current.source}</div>
+				<div class="progress-bar" style="height:8px;">
+					<div class="fill" style="width: {progressPct}%"></div>
 				</div>
 			</div>
-		</div>
-	</div>
-
-	<div class="rating-area">
-		<div class="rating-label">How well did you know this?</div>
-		<div class="rating-buttons">
-			<button class="rate-btn again"><span class="rate-label">Again</span><span class="rate-interval">&lt; 1 min</span></button>
-			<button class="rate-btn hard"><span class="rate-label">Hard</span><span class="rate-interval">6 min</span></button>
-			<button class="rate-btn good"><span class="rate-label">Good</span><span class="rate-interval">3 days</span></button>
-			<button class="rate-btn easy"><span class="rate-label">Easy</span><span class="rate-interval">7 days</span></button>
-		</div>
-		<div class="rating-shortcut">Keyboard: 1 = Again, 2 = Hard, 3 = Good, 4 = Easy</div>
-	</div>
-</div>
-
-<!-- Browse cards -->
-<div class="browse-section">
-	<div class="browse-header">
-		<h3>Your Cards</h3>
-		<div class="browse-controls">
-			<div class="browse-tabs">
-				<button class="browse-tab active">All</button>
-				<button class="browse-tab">Due Today</button>
-				<button class="browse-tab">New</button>
-				<button class="browse-tab">Learning</button>
-				<button class="browse-tab">Mature</button>
+			<div class="review-counts">
+				<div class="review-count new"><div class="count-num">{newCount}</div><div class="count-label">New</div></div>
+				<div class="review-count learning"><div class="count-num">{reviewCount}</div><div class="count-label">Learning</div></div>
+				<div class="review-count review"><div class="count-num">{matureCount}</div><div class="count-label">Mature</div></div>
 			</div>
-			<button class="btn btn-secondary btn-sm">+ Add Card</button>
 		</div>
-	</div>
-	<div class="card-list">
-		{#each cards as card}
-			<div class="card-preview">
-				<div class="card-preview-header">
-					<span class="preview-word">{card.word}</span>
-					<span class="tag {card.tag}" style="font-size:0.6875rem;">{card.status}</span>
-				</div>
-				<div class="preview-meaning">{card.meaning}</div>
-				<div class="card-preview-footer">
-					<span>{card.status === 'New' ? 'Not yet studied' : `Next review: ${card.nextReview}`}</span>
-					<div class="srs-indicator">
-						{#each card.dots as filled}
-							<div class="srs-dot" class:filled></div>
-						{/each}
+
+		{#if current}
+			<div class="card-stage">
+				<div class="flashcard-container">
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div class="flashcard" class:flipped onclick={() => flipped = !flipped}>
+						<div class="card-face card-front">
+							<div class="card-type-badge"><span class="tag tag-primary">Vocabulary</span></div>
+							<div class="prompt-label">What does this mean?</div>
+							<div class="prompt-word">{current.word}</div>
+							{#if current.exampleTarget}
+								<div class="prompt-context">"{current.exampleTarget}"</div>
+							{/if}
+							<button class="prompt-audio">&#x1F50A;</button>
+							<div class="flip-hint">Click or press Space to reveal</div>
+						</div>
+						<div class="card-face card-back">
+							<div class="card-type-badge"><span class="tag tag-primary">Vocabulary</span></div>
+							<div class="answer-word">{current.word}</div>
+							{#if current.pronunciation}
+								<div class="answer-pronunciation">{current.pronunciation}</div>
+							{/if}
+							<div class="answer-meaning">{current.meaning}</div>
+							{#if current.exampleTarget}
+								<div class="example-sentence">
+									<div class="ex-target">{current.exampleTarget}</div>
+									<div class="ex-native">{current.exampleNative}</div>
+								</div>
+							{/if}
+							{#if current.source}
+								<div class="answer-source">From: {current.source}</div>
+							{/if}
+						</div>
 					</div>
 				</div>
 			</div>
-		{/each}
+
+			<div class="rating-area">
+				<div class="rating-label">How well did you know this?</div>
+				<div class="rating-buttons">
+					<button class="rate-btn again"><span class="rate-label">Again</span><span class="rate-interval">&lt; 1 min</span></button>
+					<button class="rate-btn hard"><span class="rate-label">Hard</span><span class="rate-interval">6 min</span></button>
+					<button class="rate-btn good"><span class="rate-label">Good</span><span class="rate-interval">3 days</span></button>
+					<button class="rate-btn easy"><span class="rate-label">Easy</span><span class="rate-interval">7 days</span></button>
+				</div>
+				<div class="rating-shortcut">Keyboard: 1 = Again, 2 = Hard, 3 = Good, 4 = Easy</div>
+			</div>
+		{/if}
 	</div>
-</div>
+
+	<!-- Browse cards -->
+	<div class="browse-section">
+		<div class="browse-header">
+			<h3>Your Cards</h3>
+			<div class="browse-controls">
+				<div class="browse-tabs">
+					<button class="browse-tab active">All</button>
+					<button class="browse-tab">Due Today</button>
+					<button class="browse-tab">New</button>
+					<button class="browse-tab">Learning</button>
+					<button class="browse-tab">Mature</button>
+				</div>
+				<button class="btn btn-secondary btn-sm">+ Add Card</button>
+			</div>
+		</div>
+		<div class="card-list">
+			{#each flashcards as card}
+				<div class="card-preview">
+					<div class="card-preview-header">
+						<span class="preview-word">{card.word}</span>
+						<span class="tag {tagClass[card.status] ?? 'tag-primary'}" style="font-size:0.6875rem;">{card.status}</span>
+					</div>
+					<div class="preview-meaning">{card.meaning}</div>
+					<div class="card-preview-footer">
+						<span>{card.status === 'New' ? 'Not yet studied' : `Next review: ${card.nextReview}`}</span>
+						<div class="srs-indicator">
+							{#each card.dots as filled}
+								<div class="srs-dot" class:filled></div>
+							{/each}
+						</div>
+					</div>
+				</div>
+			{/each}
+		</div>
+	</div>
+{/if}
 
 <style>
+	.empty-page { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-md); color: var(--text-secondary); text-align: center; padding: var(--space-2xl); }
+	.empty-icon { font-size: 3rem; margin-bottom: var(--space-sm); }
+	.empty-page h2 { color: var(--text); }
+	.empty-page p { max-width: 400px; font-size: 0.9375rem; line-height: 1.6; }
+
 	.flashcard-layout { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 	.review-header { padding: var(--space-md) var(--space-xl); border-bottom: 1px solid var(--border); background: var(--surface); display: flex; align-items: center; gap: var(--space-lg); }

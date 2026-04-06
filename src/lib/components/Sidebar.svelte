@@ -1,5 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import {
+		userProfile,
+		recentConversations,
+		flashcardsDueCount,
+	} from '$lib/stores.svelte';
 
 	const pathname = $derived(page.url.pathname);
 </script>
@@ -21,41 +26,41 @@
 	<a class="nav-item" class:active={pathname.startsWith('/flashcards')} href="/flashcards">
 		<span class="nav-icon">&#x1F0CF;</span>
 		Flashcards
-		<span class="badge">12</span>
+		{#if flashcardsDueCount > 0}
+			<span class="badge">{flashcardsDueCount}</span>
+		{/if}
 	</a>
 	<a class="nav-item" class:active={pathname.startsWith('/progress')} href="/progress">
 		<span class="nav-icon">&#x1F4CA;</span>
 		Progress
 	</a>
 
-	<div class="nav-section">
-		<div class="nav-section-title">Recent Conversations</div>
-		<a class="nav-item" href="/conversation">
-			<span class="nav-icon">&#x1F4AC;</span>
-			<span class="truncate">Ordering at a cafe</span>
-		</a>
-		<a class="nav-item" href="/conversation">
-			<span class="nav-icon">&#x1F4AC;</span>
-			<span class="truncate">Asking for directions</span>
-		</a>
-		<a class="nav-item" href="/conversation">
-			<span class="nav-icon">&#x1F4AC;</span>
-			<span class="truncate">Introducing yourself</span>
-		</a>
-	</div>
+	{#if recentConversations.length > 0}
+		<div class="nav-section">
+			<div class="nav-section-title">Recent Conversations</div>
+			{#each recentConversations as conv}
+				<a class="nav-item" href="/conversation">
+					<span class="nav-icon">&#x1F4AC;</span>
+					<span class="truncate">{conv.title}</span>
+				</a>
+			{/each}
+		</div>
+	{/if}
 
 	<div class="sidebar-footer">
 		<a class="nav-item" href="/">
 			<span class="nav-icon">&#x2699;</span>
 			Settings
 		</a>
-		<div class="user-card">
-			<div class="user-avatar">J</div>
-			<div class="user-info">
-				<div class="user-name">Joe</div>
-				<div class="user-level">Learning Spanish</div>
+		{#if userProfile}
+			<div class="user-card">
+				<div class="user-avatar">{userProfile.name.charAt(0).toUpperCase()}</div>
+				<div class="user-info">
+					<div class="user-name">{userProfile.name}</div>
+					<div class="user-level">Learning {userProfile.targetLanguage}</div>
+				</div>
 			</div>
-		</div>
+		{/if}
 	</div>
 </nav>
 

@@ -6,9 +6,9 @@ mod vad;
 
 use audio::pipeline::AudioState;
 use llm::parser::{ParsedTutorResponse, StreamingJsonParser};
-use llm::prompt::{spanish_cafe_system_prompt, ChatMessage};
+use llm::prompt::{build_system_prompt, ChatMessage};
 use llm::{GenChunk, LlmState};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, RunEvent, State};
@@ -26,7 +26,7 @@ fn models_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 /// Find a Gemma GGUF model file in the given directory.
 /// Accepts any file matching `gemma*.gguf` (Q4_K_M, Q4_0, etc).
-fn find_gemma_model(dir: &PathBuf) -> Result<PathBuf, String> {
+fn find_gemma_model(dir: &Path) -> Result<PathBuf, String> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         // Prefer Q4_K_M > Q5_K_M > Q4_0, but accept any gemma .gguf.
         let mut candidates: Vec<PathBuf> = entries
@@ -56,7 +56,7 @@ fn find_gemma_model(dir: &PathBuf) -> Result<PathBuf, String> {
 }
 
 /// Find a Whisper model file in the given directory.
-fn find_whisper_model(dir: &PathBuf) -> Result<PathBuf, String> {
+fn find_whisper_model(dir: &Path) -> Result<PathBuf, String> {
     let patterns = [
         "ggml-small.bin",
         "ggml-small.en.bin",
@@ -214,7 +214,7 @@ async fn reset_conversation(history: State<'_, ConversationHistory>) -> Result<(
 }
 
 /// Run one conversation turn: student text in → streamed tutor response out.
-/// Streams incremental text via `tutor-message-chunk` events, synthesizes
+/// Synthesizes
 /// complete sentences to TTS as they form, and emits a final
 /// `tutor-message-done` event with the parsed structured response.
 #[tauri::command]
@@ -236,11 +236,12 @@ async fn conversation_turn(
     cancel_flag.store(false, Ordering::Relaxed);
 
     // Build the message list from history + new user turn.
+    let user_msg = ChatMessage::user(student_text);
     let mut messages = history.inner().messages_with_system();
-    messages.push(ChatMessage::user(student_text.clone()));
+    messages.push(user_msg.clone());
 
     // Record the student turn immediately.
-    history.inner().push(ChatMessage::user(student_text.clone()));
+    history.inner().push(user_msg);
 
     let llm = llm.inner().clone();
     let audio_handle = audio.inner().clone();
@@ -254,6 +255,21 @@ async fn conversation_turn(
         let mut parser = StreamingJsonParser::new();
         let mut full_text = String::new();
 
+        // Speak + emit completed sentences as they form.
+        let speak_sentences = |parser: &mut StreamingJsonParser| {
+            for sentence in parser.take_sentences() {
+                if cancel_for_llm.load(Ordering::Relaxed) {
+                    break;
+                }
+                if let Ok(samples) = audio_handle.synthesize(&sentence) {
+                    if !samples.is_empty() {
+                        let _ = audio_handle.play_audio(samples, 24000);
+                    }
+                }
+                let _ = app_handle.emit("tutor-sentence", &sentence);
+            }
+        };
+
         // Pull chunks until Done or Error.
         loop {
             let chunk = match chunk_rx.recv() {
@@ -264,23 +280,7 @@ async fn conversation_turn(
                 GenChunk::Text(t) => {
                     full_text.push_str(&t);
                     parser.push(&t);
-
-                    // Emit raw text chunks to the UI so it can render
-                    // progressively (e.g. a typing indicator or streaming bubble).
-                    let _ = app_handle.emit("tutor-message-chunk", &t);
-
-                    // Extract any newly-complete sentences and dispatch to TTS.
-                    for sentence in parser.take_sentences() {
-                        if cancel_for_llm.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        if let Ok(samples) = audio_handle.synthesize(&sentence) {
-                            if !samples.is_empty() {
-                                let _ = audio_handle.play_audio(samples, 24000);
-                            }
-                        }
-                        let _ = app_handle.emit("tutor-sentence", &sentence);
-                    }
+                    speak_sentences(&mut parser);
                 }
                 GenChunk::Done { full_text: final_text } => {
                     full_text = final_text;
@@ -292,19 +292,8 @@ async fn conversation_turn(
             }
         }
 
-        // Flush any final sentence (the streaming parser marks itself Finished
-        // when the closing quote arrives, so take_sentences will emit the tail).
-        for sentence in parser.take_sentences() {
-            if cancel_for_llm.load(Ordering::Relaxed) {
-                break;
-            }
-            if let Ok(samples) = audio_handle.synthesize(&sentence) {
-                if !samples.is_empty() {
-                    let _ = audio_handle.play_audio(samples, 24000);
-                }
-            }
-            let _ = app_handle.emit("tutor-sentence", &sentence);
-        }
+        // Flush any tail sentence after the stream ends.
+        speak_sentences(&mut parser);
 
         // Final structured parse.
         let parsed = ParsedTutorResponse::from_streamed(&full_text);
@@ -427,18 +416,32 @@ struct ConversationTurnResult {
     parse_error: Option<String>,
 }
 
-/// Conversation history held in memory for the current session.
-/// Cleared on `reset_conversation` or app restart.
 #[derive(Clone)]
-pub struct ConversationHistory {
+struct ConversationHistory {
     inner: Arc<Mutex<Vec<ChatMessage>>>,
+    system_prompt: Arc<Mutex<String>>,
 }
 
 impl ConversationHistory {
     fn new() -> Self {
+        // Default to a free conversation prompt until the DB layer provides
+        // real learner profile and lesson data.
+        let default_prompt = build_system_prompt(
+            "Spanish",
+            "Learner",
+            "English",
+            "A1 (Beginner)",
+            &["Conversation"],
+            None,
+        );
         Self {
             inner: Arc::new(Mutex::new(Vec::new())),
+            system_prompt: Arc::new(Mutex::new(default_prompt)),
         }
+    }
+
+    fn set_system_prompt(&self, prompt: String) {
+        *self.system_prompt.lock().unwrap() = prompt;
     }
 
     fn clear(&self) {
@@ -452,16 +455,16 @@ impl ConversationHistory {
     /// Return the full message list prefixed with the system prompt.
     fn messages_with_system(&self) -> Vec<ChatMessage> {
         let hist = self.inner.lock().unwrap();
+        let prompt = self.system_prompt.lock().unwrap();
         let mut out = Vec::with_capacity(hist.len() + 1);
-        out.push(ChatMessage::system(spanish_cafe_system_prompt()));
+        out.push(ChatMessage::system(prompt.clone()));
         out.extend(hist.iter().cloned());
         out
     }
 }
 
-/// Cancel flag for in-flight LLM generation. Set to true to request abort.
 #[derive(Clone)]
-pub struct CancelFlag(Arc<AtomicBool>);
+struct CancelFlag(Arc<AtomicBool>);
 
 impl CancelFlag {
     fn new() -> Self {
@@ -493,15 +496,14 @@ pub fn run() {
             std::thread::spawn(move || {
                 println!("[duo] background model loading started");
 
-                let data_dir = match handle.path().app_data_dir() {
+                let mdir = match models_dir(&handle) {
                     Ok(d) => d,
                     Err(e) => {
-                        println!("[duo] failed to get app data dir: {e}");
+                        println!("[duo] {e}");
                         return;
                     }
                 };
-                let mdir = data_dir.join("models");
-                let _ = std::fs::create_dir_all(&mdir);
+                let data_dir = mdir.parent().unwrap().to_path_buf();
 
                 // VAD (~2 MB, loads in <1s)
                 let vad_path = mdir.join("silero_vad.onnx");

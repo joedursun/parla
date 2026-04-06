@@ -18,6 +18,7 @@
 		type GrammarNote,
 		type SuggestedResponse,
 	} from '$lib/conversation';
+	import { userProfile, currentLesson } from '$lib/stores.svelte';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import { onMount, onDestroy } from 'svelte';
 
@@ -39,7 +40,6 @@
 
 	// Currently-streaming tutor bubble (partial text as tokens arrive).
 	// We render this as a placeholder bubble until `tutor-message-done` fires.
-	let streamingRaw = $state('');
 	let streamingSentences: string[] = $state([]);
 
 	// Poll model readiness (models load in background at app startup)
@@ -59,11 +59,6 @@
 
 		// Subscribe to streaming events from the Rust LLM pipeline.
 		unlisteners.push(
-			await listen<string>('tutor-message-chunk', (e) => {
-				streamingRaw += e.payload;
-			})
-		);
-		unlisteners.push(
 			await listen<string>('tutor-sentence', (e) => {
 				streamingSentences = [...streamingSentences, e.payload];
 			})
@@ -71,7 +66,6 @@
 		unlisteners.push(
 			await listen<ConversationTurnResult>('tutor-message-done', (e) => {
 				applyTutorResponse(e.payload);
-				streamingRaw = '';
 				streamingSentences = [];
 			})
 		);
@@ -131,11 +125,10 @@
 		if (!trimmed) return;
 		liveMessages = [...liveMessages, { role: 'student', target: trimmed, translation: '' }];
 		awaitingTutor = true;
-		streamingRaw = '';
 		streamingSentences = [];
 		try {
 			// conversationTurn resolves after the tutor finishes — the intermediate
-			// streaming events update streamingRaw/streamingSentences for live UI.
+			// streaming events update streamingSentences for live UI.
 			await conversationTurn(trimmed);
 		} catch (e) {
 			console.error('conversation_turn failed:', e);
@@ -192,7 +185,6 @@
 		contextVocab = [];
 		grammarNotes = [];
 		suggestions = [];
-		streamingRaw = '';
 		streamingSentences = [];
 	}
 
@@ -204,7 +196,7 @@
 		role: 'tutor' | 'student';
 		target: string;
 		translation: string;
-		correction?: { wrong: string; right: string; alt?: string; explain: string };
+		correction?: { wrong: string; right: string; explain: string };
 		vocab?: { word: string; meaning: string };
 	};
 
@@ -218,10 +210,14 @@
 		<div class="chat-header">
 			<div class="tutor-avatar-sm">&#x1F393;</div>
 			<div class="chat-header-info">
-				<div class="chat-header-title">Your Spanish Tutor</div>
+				<div class="chat-header-title">Your {userProfile?.targetLanguage ?? 'Language'} Tutor</div>
 				<div class="chat-header-meta">
 					<span class="dot"></span>
-					Active &middot; Lesson 4: Ordering Food
+					{#if currentLesson}
+						Active &middot; {currentLesson.title}
+					{:else}
+						Free Conversation
+					{/if}
 				</div>
 			</div>
 			<div class="chat-header-actions">
@@ -235,22 +231,18 @@
 			</div>
 		</div>
 
-		<div class="lesson-banner">
-			<span>&#x1F37D;</span>
-			<span>Lesson: Ordering Food &amp; Drinks at a Restaurant</span>
-			<div class="progress-mini">
-				<span class="text-xs">60%</span>
-				<div class="progress-bar" style="width:120px;height:4px;">
-					<div class="fill" style="width: 60%"></div>
-				</div>
+		{#if currentLesson}
+			<div class="lesson-banner">
+				<span>&#x1F37D;</span>
+				<span>Lesson: {currentLesson.title}</span>
 			</div>
-		</div>
+		{/if}
 
 		<div class="messages">
 			{#if liveMessages.length === 0 && !awaitingTutor}
 				<div class="empty-hint">
 					{#if llm?.loaded}
-						<p>Tap the mic or type to start a conversation with your Spanish tutor.</p>
+						<p>Tap the mic or type to start a conversation with your {userProfile?.targetLanguage ?? 'language'} tutor.</p>
 					{:else}
 						<p>Loading language model… this can take a moment on first launch.</p>
 					{/if}
@@ -260,7 +252,7 @@
 			{#each liveMessages as msg}
 				<div class="message {msg.role}">
 					<div class="message-avatar">
-						{#if msg.role === 'tutor'}&#x1F393;{:else}J{/if}
+						{#if msg.role === 'tutor'}&#x1F393;{:else}{userProfile?.name?.charAt(0)?.toUpperCase() ?? '?'}{/if}
 					</div>
 					<div class="message-content">
 						<div class="bubble">
@@ -303,8 +295,6 @@
 						<div class="bubble streaming">
 							{#if streamingSentences.length > 0}
 								<span class="target-text">{streamingSentences.join(' ')}</span>
-							{:else if streamingRaw.length > 0}
-								<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
 							{:else}
 								<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
 							{/if}
@@ -330,7 +320,7 @@
 			<div class="input-row">
 				<textarea
 					rows="1"
-					placeholder="Type in Spanish (or English to translate)..."
+					placeholder="Type in {userProfile?.targetLanguage ?? 'the target language'} (or {userProfile?.nativeLanguage ?? 'your language'} to translate)..."
 					bind:value={textInput}
 					onkeydown={(e) => {
 						if (e.key === 'Enter' && !e.shiftKey) {
@@ -379,18 +369,22 @@
 	</div>
 
 	<div class="context-panel">
-		<div class="context-section">
-			<h4>&#x1F3AF; Lesson Focus</h4>
-			<div class="lesson-focus-card">
-				<h3>Ordering Food &amp; Drinks</h3>
-				<p>Practice ordering at a restaurant, asking about prices, and making polite requests</p>
-				<div class="focus-tags">
-					<span class="tag tag-primary">Vocabulary</span>
-					<span class="tag tag-secondary">Polite forms</span>
-					<span class="tag tag-warning">Numbers</span>
+		{#if currentLesson}
+			<div class="context-section">
+				<h4>&#x1F3AF; Lesson Focus</h4>
+				<div class="lesson-focus-card">
+					<h3>{currentLesson.title}</h3>
+					<p>{currentLesson.description}</p>
+					{#if currentLesson.tags.length > 0}
+						<div class="focus-tags">
+							{#each currentLesson.tags as tag, i}
+								<span class="tag {i === 0 ? 'tag-primary' : i === 1 ? 'tag-secondary' : 'tag-warning'}">{tag}</span>
+							{/each}
+						</div>
+					{/if}
 				</div>
 			</div>
-		</div>
+		{/if}
 
 		<div class="context-section">
 			<h4>&#x1F4D6; Vocabulary This Lesson</h4>
@@ -485,9 +479,7 @@
 	.translation { display: block; font-size: 0.8125rem; color: var(--text-muted); margin-top: 4px; font-style: italic; }
 	.message.student .bubble .translation { color: rgba(255,255,255,0.7); }
 
-	.message-actions { display: flex; gap: 4px; padding: 0 4px; }
-	.msg-action-btn { background: none; border: none; cursor: pointer; font-size: 0.8125rem; color: var(--text-muted); padding: 2px 6px; border-radius: var(--radius-sm); transition: all var(--transition); }
-	.msg-action-btn:hover { background: var(--surface-hover); color: var(--text); }
+
 
 	.correction { background: var(--accent-gold-subtle); border: 1px solid #F0D88A; border-radius: var(--radius-md); padding: var(--space-sm) var(--space-md); font-size: 0.8125rem; display: flex; align-items: flex-start; gap: var(--space-sm); max-width: 75%; align-self: flex-start; margin-left: 40px; }
 	.correction-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
