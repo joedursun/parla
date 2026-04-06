@@ -57,10 +57,53 @@ export interface ConversationTurnResult {
 	parse_error: string | null;
 }
 
+// ── Profile ──────────────────────────────────────────────────────────────
+
+export interface ProfileResult {
+	native_language: string;
+	target_language: string;
+	cefr_level: string;
+	goals: string[];
+}
+
+/** Get the saved learner profile, or null if none exists yet. */
+export async function getProfile(): Promise<ProfileResult | null> {
+	return invoke('get_profile');
+}
+
+/** Create (or replace) the learner profile. Returns the saved profile. */
+export async function createProfile(
+	nativeLanguage: string,
+	targetLanguage: string,
+	cefrLevel: string,
+	goals: string[],
+): Promise<ProfileResult> {
+	return invoke('create_profile', {
+		nativeLanguage,
+		targetLanguage,
+		cefrLevel,
+		goals,
+	});
+}
+
+// ── Conversation ─────────────────────────────────────────────────────────
+
 /** Run one conversation turn. Emits `tutor-message-chunk`, `tutor-sentence`,
  *  and `tutor-message-done` events via Tauri's event system while streaming. */
 export async function conversationTurn(studentText: string): Promise<ConversationTurnResult> {
 	return invoke('conversation_turn', { studentText });
+}
+
+// ── Recent conversations ───────────────────────────���─────────────────────
+
+export interface RecentConversationResult {
+	id: string;
+	title: string;
+}
+
+/** Fetch recent conversations for the sidebar. */
+export async function getRecentConversations(): Promise<RecentConversationResult[]> {
+	return invoke('get_recent_conversations');
 }
 
 /** Clear the in-memory conversation history (start a fresh session). */

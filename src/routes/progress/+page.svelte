@@ -1,12 +1,12 @@
 <script lang="ts">
-	import {
-		userProfile,
-		skills,
-		weakAreas,
-		vocabCategories,
-		grammarConcepts,
-		levelProgress,
-	} from '$lib/stores.svelte';
+	import { store } from '$lib/stores.svelte';
+
+	const userProfile = $derived(store.userProfile);
+	const skills = $derived(store.skills);
+	const weakAreas = $derived(store.weakAreas);
+	const vocabCategories = $derived(store.vocabCategories);
+	const grammarConcepts = $derived(store.grammarConcepts);
+	const levelProgress = $derived(store.levelProgress);
 
 	const hasData = $derived(
 		skills.length > 0 || weakAreas.length > 0 || vocabCategories.length > 0 || grammarConcepts.length > 0 || levelProgress.level !== ''
@@ -175,7 +175,7 @@
 	.skill-level { font-size: 0.8125rem; color: var(--text-muted); margin-bottom: var(--space-md); }
 	.skill-pct { font-size: 0.75rem; color: var(--text-muted); text-align: right; margin-top: var(--space-xs); }
 
-	.weak-areas { background: var(--secondary-subtle); border: 1px solid #F0C6BD; border-radius: var(--radius-lg); padding: var(--space-lg); margin-bottom: var(--space-xl); }
+	.weak-areas { background: var(--secondary-subtle); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-lg); margin-bottom: var(--space-xl); }
 	.weak-areas h3 { color: var(--secondary); margin-bottom: var(--space-sm); }
 	.weak-areas p { font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: var(--space-md); }
 	.weak-list { display: flex; flex-wrap: wrap; gap: var(--space-sm); }

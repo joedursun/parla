@@ -1,5 +1,8 @@
 <script lang="ts">
-	import { flashcards, flashcardsDueCount } from '$lib/stores.svelte';
+	import { store } from '$lib/stores.svelte';
+
+	const flashcards = $derived(store.flashcards);
+	const flashcardsDueCount = $derived(store.flashcardsDueCount);
 
 	let flipped = $state(false);
 	let currentIndex = $state(0);
@@ -180,17 +183,17 @@
 	.rate-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 	.rate-label { font-weight: 700; font-size: 0.9375rem; }
 	.rate-interval { font-size: 0.75rem; color: var(--text-muted); }
-	.rate-btn.again { border-color: #F5C6C6; }
-	.rate-btn.again:hover { background: #FDF0F0; border-color: var(--danger); }
+	.rate-btn.again { border-color: rgba(224, 85, 85, 0.35); }
+	.rate-btn.again:hover { background: rgba(224, 85, 85, 0.1); border-color: var(--danger); }
 	.rate-btn.again .rate-label { color: var(--danger); }
-	.rate-btn.hard { border-color: #F5DFC6; }
-	.rate-btn.hard:hover { background: #FFF8F0; border-color: var(--warning); }
+	.rate-btn.hard { border-color: rgba(232, 168, 37, 0.35); }
+	.rate-btn.hard:hover { background: rgba(232, 168, 37, 0.1); border-color: var(--warning); }
 	.rate-btn.hard .rate-label { color: var(--warning); }
-	.rate-btn.good { border-color: #C6E8D4; }
-	.rate-btn.good:hover { background: #F0FDF5; border-color: var(--success); }
+	.rate-btn.good { border-color: rgba(93, 190, 138, 0.35); }
+	.rate-btn.good:hover { background: rgba(93, 190, 138, 0.1); border-color: var(--success); }
 	.rate-btn.good .rate-label { color: var(--success); }
-	.rate-btn.easy { border-color: #C6D4F5; }
-	.rate-btn.easy:hover { background: #F0F5FD; border-color: var(--primary); }
+	.rate-btn.easy { border-color: rgba(124, 111, 224, 0.35); }
+	.rate-btn.easy:hover { background: rgba(124, 111, 224, 0.1); border-color: var(--primary); }
 	.rate-btn.easy .rate-label { color: var(--primary); }
 	.rating-shortcut { font-size: 0.75rem; color: var(--text-muted); }
 

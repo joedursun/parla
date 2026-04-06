@@ -1,13 +1,13 @@
 <script lang="ts">
-	import {
-		userProfile,
-		lessons,
-		recentVocabulary,
-		activityData,
-		dailyStats,
-		flashcardsDueCount,
-		currentLesson,
-	} from '$lib/stores.svelte';
+	import { store } from '$lib/stores.svelte';
+
+	const userProfile = $derived(store.userProfile);
+	const lessons = $derived(store.lessons);
+	const recentVocabulary = $derived(store.recentVocabulary);
+	const activityData = $derived(store.activityData);
+	const dailyStats = $derived(store.dailyStats);
+	const flashcardsDueCount = $derived(store.flashcardsDueCount);
+	const currentLesson = $derived(store.currentLesson);
 </script>
 
 <div class="page-body">
@@ -217,7 +217,7 @@
 	.empty-state p { margin-bottom: var(--space-md); font-size: 0.875rem; }
 
 	.right-col { display: flex; flex-direction: column; gap: var(--space-md); }
-	.review-banner { background: var(--accent-gold-subtle); border: 1px solid #F0D88A; border-radius: var(--radius-lg); padding: var(--space-md) var(--space-lg); display: flex; align-items: center; gap: var(--space-md); }
+	.review-banner { background: var(--accent-gold-subtle); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-md) var(--space-lg); display: flex; align-items: center; gap: var(--space-md); }
 	.review-icon { font-size: 1.25rem; }
 	.review-text { flex: 1; }
 	.review-text strong { font-weight: 600; }
@@ -236,7 +236,7 @@
 
 	.activity-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; padding: 0 var(--space-lg) var(--space-lg); }
 	.activity-cell { aspect-ratio: 1; border-radius: 3px; background: var(--border-light); }
-	.activity-cell.level-1 { background: #D4CEF8; }
-	.activity-cell.level-2 { background: #A89CF0; }
+	.activity-cell.level-1 { background: rgba(124, 111, 224, 0.25); }
+	.activity-cell.level-2 { background: rgba(124, 111, 224, 0.5); }
 	.activity-cell.level-3 { background: var(--primary); }
 </style>

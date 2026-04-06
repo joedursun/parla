@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import {
-		userProfile,
-		recentConversations,
-		flashcardsDueCount,
-	} from '$lib/stores.svelte';
+	import { store } from '$lib/stores.svelte';
+
+	const userProfile = $derived(store.userProfile);
+	const recentConversations = $derived(store.recentConversations);
+	const flashcardsDueCount = $derived(store.flashcardsDueCount);
 
 	const pathname = $derived(page.url.pathname);
 </script>

@@ -18,7 +18,10 @@
 		type GrammarNote,
 		type SuggestedResponse,
 	} from '$lib/conversation';
-	import { userProfile, currentLesson } from '$lib/stores.svelte';
+	import { store } from '$lib/stores.svelte';
+
+	const userProfile = $derived(store.userProfile);
+	const currentLesson = $derived(store.currentLesson);
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import { onMount, onDestroy } from 'svelte';
 
@@ -200,6 +203,23 @@
 		vocab?: { word: string; meaning: string };
 	};
 
+	let messagesEl: HTMLDivElement | undefined = $state();
+
+	function scrollToBottom() {
+		if (messagesEl) {
+			messagesEl.scrollTop = messagesEl.scrollHeight;
+		}
+	}
+
+	$effect(() => {
+		// Trigger on any change to messages or streaming content.
+		void liveMessages.length;
+		void streamingSentences.length;
+		void awaitingTutor;
+		// Tick to let the DOM update first.
+		requestAnimationFrame(scrollToBottom);
+	});
+
 	function canSend() {
 		return llm?.loaded && !awaitingTutor;
 	}
@@ -238,7 +258,7 @@
 			</div>
 		{/if}
 
-		<div class="messages">
+		<div class="messages" bind:this={messagesEl}>
 			{#if liveMessages.length === 0 && !awaitingTutor}
 				<div class="empty-hint">
 					{#if llm?.loaded}
@@ -447,7 +467,7 @@
 	.dot { width: 6px; height: 6px; border-radius: var(--radius-full); background: var(--success); }
 	.chat-header-actions { display: flex; gap: var(--space-xs); }
 
-	.lesson-banner { background: var(--primary-subtle); padding: var(--space-sm) var(--space-lg); display: flex; align-items: center; gap: var(--space-sm); font-size: 0.8125rem; color: var(--primary); font-weight: 500; border-bottom: 1px solid #D4CEF8; }
+	.lesson-banner { background: var(--primary-subtle); padding: var(--space-sm) var(--space-lg); display: flex; align-items: center; gap: var(--space-sm); font-size: 0.8125rem; color: var(--primary); font-weight: 500; border-bottom: 1px solid var(--border); }
 	.progress-mini { margin-left: auto; display: flex; align-items: center; gap: var(--space-sm); }
 	.text-xs { font-size: 0.75rem; }
 
@@ -481,7 +501,7 @@
 
 
 
-	.correction { background: var(--accent-gold-subtle); border: 1px solid #F0D88A; border-radius: var(--radius-md); padding: var(--space-sm) var(--space-md); font-size: 0.8125rem; display: flex; align-items: flex-start; gap: var(--space-sm); max-width: 75%; align-self: flex-start; margin-left: 40px; }
+	.correction { background: var(--accent-gold-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm) var(--space-md); font-size: 0.8125rem; display: flex; align-items: flex-start; gap: var(--space-sm); max-width: 75%; align-self: flex-start; margin-left: 40px; }
 	.correction-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
 	.correction .wrong { text-decoration: line-through; color: var(--danger); }
 	.correction .right { color: var(--success); font-weight: 600; }
@@ -500,10 +520,10 @@
 	.input-actions { display: flex; gap: 4px; align-items: center; }
 
 	.voice-btn { width: 40px; height: 40px; border-radius: var(--radius-full); border: none; background: var(--secondary); color: white; font-size: 1.125rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all var(--transition); }
-	.voice-btn:hover { background: #d4634d; transform: scale(1.05); }
+	.voice-btn:hover { background: var(--secondary-light); transform: scale(1.05); }
 	.voice-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 	.voice-btn.recording { background: var(--danger); animation: pulse 1.5s infinite; }
-	@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(217, 75, 75, 0.4); } 50% { box-shadow: 0 0 0 8px rgba(217, 75, 75, 0); } }
+	@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(224, 85, 85, 0.4); } 50% { box-shadow: 0 0 0 8px rgba(224, 85, 85, 0); } }
 	.send-btn { width: 40px; height: 40px; border-radius: var(--radius-full); border: none; background: var(--primary); color: white; font-size: 1.125rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all var(--transition); }
 	.send-btn:hover { background: var(--primary-dark); }
 	.input-hint { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin-top: var(--space-xs); }

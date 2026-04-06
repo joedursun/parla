@@ -1,9 +1,10 @@
 /**
  * Reactive application state. All values initialize to empty/zero defaults.
- * Once the DB layer exists (Phase 3+), these will be populated from SQLite
- * via Tauri IPC commands on app startup and after mutations.
+ * Populated from SQLite via Tauri IPC commands on app startup and after mutations.
  *
- * Uses Svelte 5 runes ($state) for fine-grained reactivity.
+ * Svelte 5 rule: exported $state cannot be reassigned from outside the module.
+ * So we keep all mutable state inside a single exported object (`store`) whose
+ * *properties* are mutated, and provide setter functions for external callers.
  */
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -91,62 +92,58 @@ export interface DailyStats {
 }
 
 // ── State ────────────────────────────────────────────────────────────────
+// A single exported object whose properties are $state-ified via class fields.
 
-/** User profile — null until onboarding is complete. */
-export let userProfile: UserProfile | null = $state(null);
+class Store {
+	userProfile: UserProfile | null = $state(null);
+	currentLesson: LessonFocus | null = $state(null);
+	lessons: Lesson[] = $state([]);
+	recentVocabulary: VocabWord[] = $state([]);
+	recentConversations: RecentConversation[] = $state([]);
+	flashcardsDueCount: number = $state(0);
+	activityData: number[] = $state([]);
+	dailyStats: DailyStats = $state({
+		streak: 0,
+		wordsLearned: 0,
+		wordsLearnedTrend: '',
+		practiceTime: '0h',
+		practiceTimeTrend: '',
+		flashcardAccuracy: '0%',
+		flashcardAccuracyTrend: '',
+	});
+	flashcards: FlashcardSummary[] = $state([]);
+	skills: SkillProgress[] = $state([]);
+	weakAreas: WeakArea[] = $state([]);
+	vocabCategories: VocabCategory[] = $state([]);
+	grammarConcepts: GrammarConcept[] = $state([]);
+	levelProgress = $state({
+		level: '',
+		label: '',
+		pct: 0,
+		description: '',
+		milestones: [] as { name: string; done: boolean }[],
+		totalMastered: 0,
+		totalLearning: 0,
+		totalNew: 0,
+	});
+}
 
-/** Current lesson info — null when no lesson is active. */
-export let currentLesson: LessonFocus | null = $state(null);
+export const store = new Store();
 
-/** Ordered list of lessons in the learning path. */
-export let lessons: Lesson[] = $state([]);
+// ── Setters (for use from layout / event listeners) ─────────────────────
 
-/** Recent vocabulary with strength indicators. */
-export let recentVocabulary: VocabWord[] = $state([]);
+export function setUserProfile(p: UserProfile | null) {
+	store.userProfile = p;
+}
 
-/** Past conversations for the sidebar. */
-export let recentConversations: RecentConversation[] = $state([]);
+export function setRecentVocabulary(v: VocabWord[]) {
+	store.recentVocabulary = v;
+}
 
-/** Number of flashcards due for review. */
-export let flashcardsDueCount: number = $state(0);
+export function setRecentConversations(c: RecentConversation[]) {
+	store.recentConversations = c;
+}
 
-/** Activity heatmap data (last 28 days, 0-3 intensity). */
-export let activityData: number[] = $state([]);
-
-/** Aggregated daily stats. */
-export let dailyStats: DailyStats = $state({
-	streak: 0,
-	wordsLearned: 0,
-	wordsLearnedTrend: '',
-	practiceTime: '0h',
-	practiceTimeTrend: '',
-	flashcardAccuracy: '0%',
-	flashcardAccuracyTrend: '',
-});
-
-/** Flashcard deck for the review page. */
-export let flashcards: FlashcardSummary[] = $state([]);
-
-/** Skill breakdown for progress page. */
-export let skills: SkillProgress[] = $state([]);
-
-/** Weak areas for progress page. */
-export let weakAreas: WeakArea[] = $state([]);
-
-/** Vocabulary categories for progress page. */
-export let vocabCategories: VocabCategory[] = $state([]);
-
-/** Grammar concepts for progress page. */
-export let grammarConcepts: GrammarConcept[] = $state([]);
-
-/** Overall level progress for progress page. */
-export let levelProgress = $state({
-	level: '',
-	label: '',
-	pct: 0,
-	description: '',
-	milestones: [] as { name: string; done: boolean }[],
-	totalMastered: 0,
-	totalLearning: 0,
-	totalNew: 0,
-});
+export function setFlashcardsDueCount(n: number) {
+	store.flashcardsDueCount = n;
+}

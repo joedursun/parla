@@ -1,10 +1,12 @@
 mod audio;
+mod db;
 mod llm;
 mod stt;
 mod tts;
 mod vad;
 
 use audio::pipeline::AudioState;
+use db::Db;
 use llm::parser::{ParsedTutorResponse, StreamingJsonParser};
 use llm::prompt::{build_system_prompt, ChatMessage};
 use llm::{GenChunk, LlmState};
@@ -206,6 +208,94 @@ async fn llm_status(state: State<'_, LlmState>) -> Result<LlmStatusResult, Strin
     })
 }
 
+// ── Profile commands ──────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_profile(db: State<'_, Db>) -> Result<Option<ProfileResult>, String> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let row = db.get_profile()?;
+        match row {
+            None => Ok(None),
+            Some(r) => {
+                let goals: Vec<String> =
+                    serde_json::from_str(&r.goals_json).unwrap_or_default();
+                Ok(Some(ProfileResult {
+                    native_language: r.native_language,
+                    target_language: r.target_language,
+                    cefr_level: r.cefr_level,
+                    goals,
+                }))
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("{e}"))?
+}
+
+#[tauri::command]
+async fn create_profile(
+    db: State<'_, Db>,
+    history: State<'_, ConversationHistory>,
+    native_language: String,
+    target_language: String,
+    cefr_level: String,
+    goals: Vec<String>,
+) -> Result<ProfileResult, String> {
+    let db = db.inner().clone();
+    let history = history.inner().clone();
+    let tl = target_language.clone();
+    let nl = native_language.clone();
+    let cl = cefr_level.clone();
+    let g = goals.clone();
+    tokio::task::spawn_blocking(move || {
+        db.create_profile(&db::NewProfile {
+            native_language: nl.clone(),
+            target_language: tl.clone(),
+            cefr_level: cl.clone(),
+            goals: g.clone(),
+        })?;
+        // Update the system prompt for the current session.
+        let goal_refs: Vec<&str> = g.iter().map(|s| s.as_str()).collect();
+        let prompt = build_system_prompt(&tl, "Learner", &nl, &cl, &goal_refs, None);
+        history.set_system_prompt(prompt);
+        Ok(ProfileResult {
+            native_language: nl,
+            target_language: tl,
+            cefr_level: cl,
+            goals: g,
+        })
+    })
+    .await
+    .map_err(|e| format!("{e}"))?
+}
+
+// ── Conversation list commands ────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_recent_conversations(
+    db: State<'_, Db>,
+) -> Result<Vec<RecentConversationResult>, String> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let rows = db.get_recent_conversations(20)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let title = r
+                    .topic
+                    .unwrap_or_else(|| format!("{} conversation", r.mode));
+                RecentConversationResult {
+                    id: r.id.to_string(),
+                    title,
+                }
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| format!("{e}"))?
+}
+
 /// Reset the conversation history for the current session.
 #[tauri::command]
 async fn reset_conversation(history: State<'_, ConversationHistory>) -> Result<(), String> {
@@ -236,7 +326,7 @@ async fn conversation_turn(
     cancel_flag.store(false, Ordering::Relaxed);
 
     // Build the message list from history + new user turn.
-    let user_msg = ChatMessage::user(student_text);
+    let user_msg = ChatMessage::user(student_text.clone());
     let mut messages = history.inner().messages_with_system();
     messages.push(user_msg.clone());
 
@@ -328,6 +418,26 @@ async fn conversation_turn(
     // Emit the final done event with the structured response.
     let _ = app.emit("tutor-message-done", &result);
 
+    // ── Persist to SQLite (non-blocking, after the voice loop) ───────
+    if let Some(db) = app.try_state::<Db>() {
+        let db = db.inner().clone();
+        let history = history.inner().clone();
+        let student_text_for_db = student_text.clone();
+        let result_for_db = result.clone();
+        let app_for_db = app.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = persist_turn(
+                &db,
+                &history,
+                &student_text_for_db,
+                &result_for_db,
+                &app_for_db,
+            ) {
+                eprintln!("[db] persist_turn failed: {e}");
+            }
+        });
+    }
+
     Ok(result)
 }
 
@@ -339,6 +449,128 @@ async fn cancel_generation(cancel: State<'_, CancelFlag>) -> Result<(), String> 
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+/// Persist one conversation turn (student + tutor messages, corrections,
+/// vocabulary, flashcards) to SQLite. Called in a background task so it
+/// never blocks the voice loop.
+fn persist_turn(
+    db: &Db,
+    history: &ConversationHistory,
+    student_text: &str,
+    result: &ConversationTurnResult,
+    app: &tauri::AppHandle,
+) -> Result<(), String> {
+    // Ensure we have a conversation row.
+    let conv_id = match history.get_conversation_id() {
+        Some(id) => id,
+        None => {
+            let id = db.create_conversation("free", None)?;
+            history.set_conversation_id(id);
+            id
+        }
+    };
+
+    // Insert student message.
+    history.increment_messages();
+    let student_msg_id = db.insert_message(&db::NewMessage {
+        conversation_id: conv_id,
+        role: "student".into(),
+        content: student_text.to_string(),
+        translation: None,
+        input_method: "text".into(),
+    })?;
+
+    // Insert tutor message.
+    history.increment_messages();
+    let tutor_msg_id = db.insert_message(&db::NewMessage {
+        conversation_id: conv_id,
+        role: "tutor".into(),
+        content: result.tutor_target.clone(),
+        translation: if result.tutor_native.is_empty() {
+            None
+        } else {
+            Some(result.tutor_native.clone())
+        },
+        input_method: "text".into(),
+    })?;
+
+    // Process parsed structured response.
+    if let Some(parsed) = &result.parsed {
+        // Correction
+        if let Some(correction) = &parsed.correction {
+            history.increment_errors();
+            db.insert_correction(&db::NewCorrection {
+                message_id: student_msg_id,
+                conversation_id: conv_id,
+                original_text: correction.original.clone(),
+                corrected_text: correction.corrected.clone(),
+                explanation: correction.explanation.clone(),
+                error_type: "grammar".into(),
+            })?;
+        }
+
+        // Vocabulary + flashcards
+        for vocab in &parsed.new_vocabulary {
+            let vocab_id = db.upsert_vocabulary(&db::NewVocabulary {
+                target_text: vocab.target_text.clone(),
+                native_text: vocab.native_text.clone(),
+                pronunciation: vocab.pronunciation.clone(),
+                part_of_speech: vocab.part_of_speech.clone(),
+                topic: "conversation".into(),
+                example_target: vocab.example_target.clone(),
+                example_native: vocab.example_native.clone(),
+                conversation_id: Some(conv_id),
+            })?;
+            db.ensure_flashcard(vocab_id)?;
+        }
+
+        // Update conversation counts.
+        let (msg_count, err_count) = history.counts();
+        db.update_conversation_counts(conv_id, msg_count, err_count)?;
+
+        // Emit updated counts to the frontend.
+        let due = db.flashcards_due_count().unwrap_or(0);
+        let _ = app.emit("flashcards-due-count", due);
+
+        let recent = db.recent_vocabulary(10).unwrap_or_default();
+        let vocab_list: Vec<serde_json::Value> = recent
+            .iter()
+            .map(|v| {
+                serde_json::json!({
+                    "target": v.target_text,
+                    "native": v.native_text,
+                    "strength": match v.status.as_str() {
+                        "mature" => 4,
+                        "review" => 3,
+                        "learning" => 2,
+                        "new" => 1,
+                        _ => 0,
+                    }
+                })
+            })
+            .collect();
+        let _ = app.emit("recent-vocabulary", vocab_list);
+    }
+
+    // Emit updated recent conversations for the sidebar.
+    if let Ok(convs) = db.get_recent_conversations(20) {
+        let list: Vec<serde_json::Value> = convs
+            .into_iter()
+            .map(|r| {
+                let title = r
+                    .topic
+                    .unwrap_or_else(|| format!("{} conversation", r.mode));
+                serde_json::json!({ "id": r.id.to_string(), "title": title })
+            })
+            .collect();
+        let _ = app.emit("recent-conversations", list);
+    }
+
+    // Suppress unused variable warning for tutor_msg_id.
+    let _ = tutor_msg_id;
+
+    Ok(())
+}
 
 fn make_recording_result(result: &audio::pipeline::RecordingResult) -> StopRecordingResult {
     let duration_ms = (result.samples.len() as f64 / 16000.0 * 1000.0) as u64;
@@ -403,6 +635,20 @@ struct LlmStatusResult {
 }
 
 #[derive(Clone, serde::Serialize)]
+struct ProfileResult {
+    native_language: String,
+    target_language: String,
+    cefr_level: String,
+    goals: Vec<String>,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct RecentConversationResult {
+    id: String,
+    title: String,
+}
+
+#[derive(Clone, serde::Serialize)]
 struct ConversationTurnResult {
     /// The raw text the LLM emitted (full JSON).
     raw: String,
@@ -420,6 +666,12 @@ struct ConversationTurnResult {
 struct ConversationHistory {
     inner: Arc<Mutex<Vec<ChatMessage>>>,
     system_prompt: Arc<Mutex<String>>,
+    /// Current conversation's DB id (set on first turn, cleared on reset).
+    conversation_id: Arc<Mutex<Option<i64>>>,
+    /// Running message count for the current conversation.
+    message_count: Arc<Mutex<i32>>,
+    /// Running error count for the current conversation.
+    error_count: Arc<Mutex<i32>>,
 }
 
 impl ConversationHistory {
@@ -437,6 +689,9 @@ impl ConversationHistory {
         Self {
             inner: Arc::new(Mutex::new(Vec::new())),
             system_prompt: Arc::new(Mutex::new(default_prompt)),
+            conversation_id: Arc::new(Mutex::new(None)),
+            message_count: Arc::new(Mutex::new(0)),
+            error_count: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -446,10 +701,37 @@ impl ConversationHistory {
 
     fn clear(&self) {
         self.inner.lock().unwrap().clear();
+        *self.conversation_id.lock().unwrap() = None;
+        *self.message_count.lock().unwrap() = 0;
+        *self.error_count.lock().unwrap() = 0;
     }
 
     fn push(&self, msg: ChatMessage) {
         self.inner.lock().unwrap().push(msg);
+    }
+
+    fn get_conversation_id(&self) -> Option<i64> {
+        *self.conversation_id.lock().unwrap()
+    }
+
+    fn set_conversation_id(&self, id: i64) {
+        *self.conversation_id.lock().unwrap() = Some(id);
+    }
+
+    fn increment_messages(&self) -> i32 {
+        let mut c = self.message_count.lock().unwrap();
+        *c += 1;
+        *c
+    }
+
+    fn increment_errors(&self) -> i32 {
+        let mut c = self.error_count.lock().unwrap();
+        *c += 1;
+        *c
+    }
+
+    fn counts(&self) -> (i32, i32) {
+        (*self.message_count.lock().unwrap(), *self.error_count.lock().unwrap())
     }
 
     /// Return the full message list prefixed with the system prompt.
@@ -486,6 +768,37 @@ pub fn run() {
             let handle = app.handle().clone();
             let state: AudioState = app.state::<AudioState>().inner().clone();
             let llm_state: LlmState = app.state::<LlmState>().inner().clone();
+
+            // Open SQLite database.
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("failed to get app data dir: {e}"))?;
+            std::fs::create_dir_all(&data_dir)
+                .map_err(|e| format!("failed to create data dir: {e}"))?;
+            let db_path = data_dir.join("duo.db");
+            println!("[duo] opening database at {}", db_path.display());
+            let db =
+                Db::open(&db_path).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+            app.manage(db.clone());
+
+            // If a profile exists, set the system prompt from it.
+            if let Ok(Some(profile)) = db.get_profile() {
+                let goals: Vec<String> =
+                    serde_json::from_str(&profile.goals_json).unwrap_or_default();
+                let goal_refs: Vec<&str> = goals.iter().map(|s| s.as_str()).collect();
+                let prompt = build_system_prompt(
+                    &profile.target_language,
+                    "Learner",
+                    &profile.native_language,
+                    &profile.cefr_level,
+                    &goal_refs,
+                    None,
+                );
+                let history: tauri::State<ConversationHistory> = app.state();
+                history.set_system_prompt(prompt);
+                println!("[duo] loaded profile: {} -> {}", profile.native_language, profile.target_language);
+            }
 
             // Init audio devices immediately (fast, needed for everything)
             if let Err(e) = state.init() {
@@ -566,6 +879,9 @@ pub fn run() {
             audio_status,
             check_models,
             llm_status,
+            get_profile,
+            create_profile,
+            get_recent_conversations,
             conversation_turn,
             reset_conversation,
             cancel_generation,

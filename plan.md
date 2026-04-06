@@ -44,7 +44,7 @@ With 128 GB we have massive headroom. Q4_0 works well in practice and keeps the 
 
 ---
 
-## Phase 1 — Audio Pipeline (the critical path)
+## Phase 1 — Audio Pipeline (the critical path) ✓
 
 The voice loop is the core experience and the hardest integration work. Get this working end-to-end before building any learning features.
 
@@ -95,66 +95,64 @@ The voice loop is the core experience and the hardest integration work. Get this
 
 ---
 
-## Phase 2 — LLM Integration
+## Phase 2 — LLM Integration ✓
 
-### 2a: llama.cpp integration
+### 2a: llama-server integration ✓
 
-- Integrate Gemma 4 26B via `llama-cpp-rs` (Rust bindings to llama.cpp)
-- Load Q4_0 GGUF with full Metal GPU offload (`n_gpu_layers = -1`)
-- Enable flash attention
-- Configure 32K context window
-- Implement streaming token generation, yielding tokens over an async channel
+- Integrated Gemma 4 26B via llama-server (HTTP API) instead of llama-cpp-rs (the latter doesn't support Gemma 4 yet)
+- Full Metal GPU offload, flash attention, 32K context
+- Streaming token generation via SSE, yielded over async channels
 
-### 2b: Structured conversation output
+### 2b: Structured conversation output ✓
 
-- Implement the conversation system prompt assembly (see [data.md § The Conversation System Prompt](data.md#3-the-conversation-loop-core-teaching-flow))
-- Parse the LLM's structured JSON response into Rust types:
-  - `tutor_message`, `correction`, `new_vocabulary`, `grammar_note`, `suggested_responses`, `internal_notes`
-- Handle malformed JSON gracefully (retry with a nudge, or extract what's parseable)
-- Sentence-level streaming: as the LLM streams JSON, detect complete `tutor_message.target_lang` sentences and dispatch them to TTS immediately
+- Parameterized system prompt builder (`build_system_prompt()`) accepting target language, student profile, level, goals, and optional lesson context — language-agnostic, supports free conversation mode
+- Streaming JSON parser extracts `tutor_message`, `correction`, `new_vocabulary`, `grammar_note`, `suggested_responses`, `internal_notes`
+- Sentence-level streaming dispatches complete sentences to TTS as they form
 
-### 2c: Full voice-to-voice conversation
+### 2c: Full voice-to-voice conversation ✓
 
-- Replace the stub from Phase 1e with the real LLM
-- Pipeline: mic → VAD → STT → assemble prompt → LLM (streaming) → sentence buffer → TTS → speaker
-- Conversation history maintained in memory, included in LLM context
-- Test with a hardcoded system prompt (no DB yet) — just verify natural voice conversation works
+- Pipeline working: mic → VAD → STT → parameterized prompt → LLM (streaming) → sentence buffer → TTS → speaker
+- Conversation history maintained in memory via `ConversationHistory` (stores its own system prompt)
+- Conversation UI renders live messages, corrections, vocab cards, grammar notes, and suggested responses
+- All UI pages read from Svelte stores (`src/lib/stores.svelte.ts`) with empty/zero defaults — no mock data anywhere
 
-**Exit criteria**: have a multi-turn spoken conversation with the tutor, hearing responses streamed sentence-by-sentence.
+**Exit criteria**: ✓ multi-turn spoken conversation with the tutor, streamed sentence-by-sentence. All UI shows real data or appropriate empty states.
 
 ---
 
-## Phase 3 — Data Layer and Conversation UI
+## Phase 3 — Data Layer and Persistence ✓
 
-### 3a: SQLite database
+### 3a: SQLite database ✓
 
-- Set up SQLite via `rusqlite` with WAL mode for concurrent reads
-- Implement the full schema from [data.md § SQLite Schema](data.md#sqlite-schema)
-- Write Rust data access functions for all tables
-- Run migrations on app startup (embed migrations in the binary)
+- ✓ Set up SQLite via `rusqlite` with WAL mode, all 11 tables from data.md schema
+- ✓ `Db` struct wrapping `Arc<Mutex<Connection>>`, managed as Tauri state
+- ✓ Data access functions for `learner_profile`, `conversations`, `messages`, `corrections`, `vocabulary`, `flashcards`
 
-### 3b: Conversation UI
+### 3b: Onboarding persistence ✓
 
-- Build the chat interface in the webview:
-  - Chat bubbles for tutor and student messages
-  - Student bubble shows transcription (from STT) with edit capability for corrections
-  - Tutor bubble shows target language text with translation on tap/hover
-  - Inline correction cards when the tutor corrects a mistake
-  - New vocabulary cards with pronunciation, translation, example
-  - Grammar notes in a collapsible context panel
-  - Suggested response chips (clickable to send)
-- Mic button: hold-to-record with visual audio level indicator
-- Text input field as alternative to voice
-- Tauri IPC: stream events from Rust to frontend (new message, correction, vocab, etc.)
+- ✓ `create_profile` / `get_profile` Tauri commands
+- ✓ Onboarding button persists profile to SQLite and sets system prompt
+- ✓ Layout loads profile on startup, redirects to `/onboarding` if none
 
-### 3c: Message persistence
+### 3c: Conversation UI ✓
 
-- Store all messages, corrections, and vocabulary in SQLite as conversations progress
-- Parse `internal_notes` from LLM responses and update grammar concept stats
-- Update conversation metadata (error_count, message_count) in real time
-- Implement conversation summarization for long conversations (see [data.md § Model Context Window Budget](data.md#appendix-model-context-window-budget))
+- ✓ Chat bubbles, corrections, vocabulary cards, grammar notes, suggested responses
+- ✓ Mic button, text input, streaming events
+- ✓ Auto-scroll on new messages
 
-**Exit criteria**: full conversation loop works via voice with live UI showing messages, corrections, vocabulary, and grammar notes, all persisted to SQLite.
+### 3d: Message persistence ✓
+
+- ✓ `persist_turn()` runs in background after each turn — stores messages, corrections, vocabulary, flashcards
+- ✓ `ConversationHistory` tracks `conversation_id`, `message_count`, `error_count` per session
+- ✓ Emits events to update frontend stores (flashcard due count, recent vocab, recent conversations)
+- ✓ `get_recent_conversations` command for sidebar
+
+### 3e: Conversation summarization
+
+- When history exceeds ~15 turns, summarize older messages via a second LLM call
+- Replace old messages in the LLM context with a `<conversation_summary>` block
+
+**Exit criteria**: ✓ user can onboard (pick language, level, goals), have the profile persist to SQLite and populate the UI. Conversations, messages, corrections, and vocabulary persist across app restarts. Flashcard rows accumulate for Phase 5. The sidebar shows real recent conversations and flashcard due counts.
 
 ---
 
@@ -287,14 +285,14 @@ The voice loop is the core experience and the hardest integration work. Get this
 
 ## Sequencing Summary
 
-| Phase | Focus | Depends On |
-|-------|-------|------------|
-| 1 | Audio pipeline (VAD → STT → TTS) | — |
-| 2 | LLM integration + voice-to-voice | Phase 1 |
-| 3 | SQLite + conversation UI + persistence | Phase 2 |
-| 4 | Onboarding + lessons + adaptation | Phase 3 |
-| 5 | Flashcard SRS | Phase 3 |
-| 6 | Progress tracking + dashboard | Phases 4, 5 |
-| 7 | Polish + optimization | All |
+| Phase | Focus | Depends On | Status |
+|-------|-------|------------|--------|
+| 1 | Audio pipeline (VAD → STT → TTS) | — | ✓ Done |
+| 2 | LLM integration + voice-to-voice | Phase 1 | ✓ Done |
+| 3 | SQLite + persistence + onboarding | Phase 2 | ✓ Done (summarization pending) |
+| 4 | Lessons + adaptation | Phase 3 | — |
+| 5 | Flashcard SRS | Phase 3 | — |
+| 6 | Progress tracking + dashboard | Phases 4, 5 | — |
+| 7 | Polish + optimization | All | — |
 
 Phases 4 and 5 can be worked in parallel once Phase 3 is complete.

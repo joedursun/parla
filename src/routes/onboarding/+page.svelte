@@ -1,5 +1,10 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { createProfile } from '$lib/conversation';
+	import { setUserProfile } from '$lib/stores.svelte';
+
 	let step = $state(1);
+	let saving = $state(false);
 
 	const languages = [
 		{ flag: '\u{1F1EA}\u{1F1F8}', name: 'Spanish', native: 'Espanol' },
@@ -36,6 +41,29 @@
 		if (next.has(i)) next.delete(i);
 		else next.add(i);
 		selectedGoals = next;
+	}
+
+	async function finishOnboarding() {
+		if (saving) return;
+		saving = true;
+		try {
+			const lang = languages[selectedLanguage];
+			const level = levels[selectedLevel];
+			const goalNames = [...selectedGoals].map((i) => goals[i].title);
+			const profile = await createProfile('English', lang.name, level.code, goalNames);
+			setUserProfile({
+				name: 'Learner',
+				nativeLanguage: profile.native_language,
+				targetLanguage: profile.target_language,
+				level: profile.cefr_level,
+				levelLabel: level.label,
+				goals: profile.goals,
+			});
+			goto('/');
+		} catch (e) {
+			console.error('Failed to save profile:', e);
+			saving = false;
+		}
 	}
 </script>
 
@@ -122,9 +150,13 @@
 					your conversations stay private.
 				</p>
 			</div>
-			<a class="btn btn-primary btn-lg full start-btn" href="/">
-				Start my first lesson &#x2192;
-			</a>
+			<button
+				class="btn btn-primary btn-lg full start-btn"
+				onclick={finishOnboarding}
+				disabled={saving}
+			>
+				{saving ? 'Setting up...' : 'Start my first lesson \u2192'}
+			</button>
 		{/if}
 	</div>
 </div>
@@ -214,7 +246,7 @@
 	.onboarding-actions .btn { flex: 1; }
 
 	.welcome-teacher { text-align: center; padding: var(--space-lg) 0; }
-	.teacher-avatar { width: 80px; height: 80px; border-radius: var(--radius-full); background: linear-gradient(135deg, var(--primary), var(--primary-light)); margin: 0 auto var(--space-lg); display: flex; align-items: center; justify-content: center; font-size: 2rem; color: white; box-shadow: 0 4px 20px rgba(91, 79, 196, 0.3); }
+	.teacher-avatar { width: 80px; height: 80px; border-radius: var(--radius-full); background: linear-gradient(135deg, var(--primary), var(--primary-light)); margin: 0 auto var(--space-lg); display: flex; align-items: center; justify-content: center; font-size: 2rem; color: white; box-shadow: 0 4px 20px rgba(124, 111, 224, 0.3); }
 	.teacher-greeting { font-size: 1.125rem; color: var(--text-secondary); line-height: 1.6; max-width: 380px; margin: 0 auto var(--space-lg); }
 	.privacy-note { font-size: 0.875rem; color: var(--text-muted); margin-bottom: var(--space-lg); }
 
