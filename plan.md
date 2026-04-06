@@ -1,4 +1,4 @@
-# Duo — Implementation Plan
+# Parla — Implementation Plan
 
 This plan targets a single-process Tauri + Rust desktop app running exclusively on Apple Silicon with 128 GB unified memory. Audio (speech-to-speech) is the primary interaction mode and drives architectural decisions throughout.
 

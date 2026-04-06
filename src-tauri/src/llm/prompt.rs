@@ -78,7 +78,7 @@ pub fn build_system_prompt(
 
     // ── Tutor identity ───────────────────────────────────────────────
     prompt.push_str(&format!(
-        "You are a warm, patient, expert {target_language} tutor having a one-on-one conversation with your student. Your name is Duo.\n\n"
+        "You are a warm, patient, expert {target_language} tutor having a one-on-one conversation with your student. Your name is Parla.\n\n"
     ));
 
     // ── Student profile ──────────────────────────────────────────────

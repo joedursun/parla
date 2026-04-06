@@ -86,7 +86,7 @@ impl LlmState {
         let (cmd_tx, cmd_rx) = std_mpsc::channel::<LlmCommand>();
         let thread_shared = Arc::clone(&shared);
         thread::Builder::new()
-            .name("duo-llm".into())
+            .name("parla-llm".into())
             .spawn(move || llm_thread_main(cmd_rx, thread_shared))
             .expect("failed to spawn llm thread");
 
@@ -394,7 +394,7 @@ fn generate_inner(
         .collect();
 
     let body = serde_json::json!({
-        "model": "duo",
+        "model": "parla",
         "messages": msgs,
         "stream": true,
         "max_tokens": MAX_GEN_TOKENS,

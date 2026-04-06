@@ -863,28 +863,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
-name = "duo"
-version = "0.1.0"
-dependencies = [
- "cpal",
- "espeak-rs",
- "hound",
- "ndarray",
- "ort",
- "ringbuf",
- "rubato",
- "rusqlite",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-shell",
- "tokio",
- "ureq 2.12.1",
- "whisper-rs",
-]
-
-[[package]]
 name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2793,6 +2771,28 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link 0.2.1",
+]
+
+[[package]]
+name = "parla"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "espeak-rs",
+ "hound",
+ "ndarray",
+ "ort",
+ "ringbuf",
+ "rubato",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-shell",
+ "tokio",
+ "ureq 2.12.1",
+ "whisper-rs",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
-# Duo — Your Personal Language Tutor
+# Parla — Your Personal Language Tutor
 
-Duo is a private, conversational language learning app that mirrors the experience of having a dedicated personal tutor. Rather than gamified drills or multiple-choice quizzes, Duo teaches through natural conversation — the way people actually acquire languages.
+Parla is a private, conversational language learning app that mirrors the experience of having a dedicated personal tutor. Rather than gamified drills or multiple-choice quizzes, Parla teaches through natural conversation — the way people actually acquire languages.
 
 Everything runs locally on your machine. Your conversations, progress, and data never leave your computer.
 
@@ -18,7 +18,7 @@ Everything runs locally on your machine. Your conversations, progress, and data 
 
 ### Getting Started
 
-When you first open Duo, you choose your target language, self-assess your level, and tell the tutor what you're learning for (travel, work, conversation, culture, academics). This shapes the tutor's approach — a traveler preparing for a trip to Spain gets different lessons than someone studying for a certification exam.
+When you first open Parla, you choose your target language, self-assess your level, and tell the tutor what you're learning for (travel, work, conversation, culture, academics). This shapes the tutor's approach — a traveler preparing for a trip to Spain gets different lessons than someone studying for a certification exam.
 
 ### The Conversation
 

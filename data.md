@@ -1,6 +1,6 @@
-# Duo -- Data Architecture & Information Flow
+# Parla -- Data Architecture & Information Flow
 
-This document describes how data flows through Duo: how lesson plans are generated, how vocabulary is tracked, and how the tutor dynamically adapts during conversations.
+This document describes how data flows through Parla: how lesson plans are generated, how vocabulary is tracked, and how the tutor dynamically adapts during conversations.
 
 ## Stack
 
@@ -324,7 +324,7 @@ This is the most critical prompt in the system. It's assembled fresh for each co
 ```
 <system>
 You are a warm, patient, expert Spanish tutor having a one-on-one
-conversation with your student. Your name is Duo.
+conversation with your student. Your name is Parla.
 
 ## Your Student
 - Name: Joe
@@ -589,7 +589,7 @@ LIMIT 20;
 
 ### 6. Dynamic Adaptation During Conversation
 
-This is what makes Duo feel like a real tutor rather than a chatbot. The key mechanisms:
+This is what makes Parla feel like a real tutor rather than a chatbot. The key mechanisms:
 
 #### a) Real-Time Error Tracking
 

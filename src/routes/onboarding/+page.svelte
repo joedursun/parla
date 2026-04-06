@@ -69,8 +69,8 @@
 
 <div class="onboarding">
 	<div class="onboarding-logo">
-		<div class="logo-icon">D</div>
-		Duo
+		<div class="logo-icon">P</div>
+		Parla
 	</div>
 
 	<div class="onboarding-card">

@@ -776,8 +776,8 @@ pub fn run() {
                 .map_err(|e| format!("failed to get app data dir: {e}"))?;
             std::fs::create_dir_all(&data_dir)
                 .map_err(|e| format!("failed to create data dir: {e}"))?;
-            let db_path = data_dir.join("duo.db");
-            println!("[duo] opening database at {}", db_path.display());
+            let db_path = data_dir.join("parla.db");
+            println!("[parla] opening database at {}", db_path.display());
             let db =
                 Db::open(&db_path).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
             app.manage(db.clone());
@@ -797,7 +797,7 @@ pub fn run() {
                 );
                 let history: tauri::State<ConversationHistory> = app.state();
                 history.set_system_prompt(prompt);
-                println!("[duo] loaded profile: {} -> {}", profile.native_language, profile.target_language);
+                println!("[parla] loaded profile: {} -> {}", profile.native_language, profile.target_language);
             }
 
             // Init audio devices immediately (fast, needed for everything)
@@ -807,12 +807,12 @@ pub fn run() {
 
             // Load all models in a background thread — never blocks the UI
             std::thread::spawn(move || {
-                println!("[duo] background model loading started");
+                println!("[parla] background model loading started");
 
                 let mdir = match models_dir(&handle) {
                     Ok(d) => d,
                     Err(e) => {
-                        println!("[duo] {e}");
+                        println!("[parla] {e}");
                         return;
                     }
                 };
@@ -821,50 +821,50 @@ pub fn run() {
                 // VAD (~2 MB, loads in <1s)
                 let vad_path = mdir.join("silero_vad.onnx");
                 if vad_path.exists() {
-                    println!("[duo] loading VAD...");
+                    println!("[parla] loading VAD...");
                     match state.init_vad(vad_path) {
-                        Ok(()) => println!("[duo] VAD loaded"),
-                        Err(e) => println!("[duo] VAD failed: {e}"),
+                        Ok(()) => println!("[parla] VAD loaded"),
+                        Err(e) => println!("[parla] VAD failed: {e}"),
                     }
                 } else {
-                    println!("[duo] VAD model not found, skipping");
+                    println!("[parla] VAD model not found, skipping");
                 }
 
                 // TTS (macOS say is instant; Kokoro ONNX ~1-2s)
-                println!("[duo] loading TTS...");
+                println!("[parla] loading TTS...");
                 let tts_dir = data_dir.join("tts");
                 match state.init_tts(tts_dir) {
-                    Ok(()) => println!("[duo] TTS loaded"),
-                    Err(e) => println!("[duo] TTS failed: {e}"),
+                    Ok(()) => println!("[parla] TTS loaded"),
+                    Err(e) => println!("[parla] TTS failed: {e}"),
                 }
 
                 // STT
-                println!("[duo] loading STT...");
+                println!("[parla] loading STT...");
                 match find_whisper_model(&mdir) {
                     Ok(stt_path) => {
-                        println!("[duo] found whisper model: {}", stt_path.display());
+                        println!("[parla] found whisper model: {}", stt_path.display());
                         match state.init_stt(stt_path) {
-                            Ok(()) => println!("[duo] STT loaded"),
-                            Err(e) => println!("[duo] STT failed: {e}"),
+                            Ok(()) => println!("[parla] STT loaded"),
+                            Err(e) => println!("[parla] STT failed: {e}"),
                         }
                     }
-                    Err(e) => println!("[duo] STT model not found: {e}"),
+                    Err(e) => println!("[parla] STT model not found: {e}"),
                 }
 
                 // LLM — heaviest, loaded last (can take 10-30s for a 26B GGUF)
-                println!("[duo] loading LLM...");
+                println!("[parla] loading LLM...");
                 match find_gemma_model(&mdir) {
                     Ok(llm_path) => {
-                        println!("[duo] found gemma model: {}", llm_path.display());
+                        println!("[parla] found gemma model: {}", llm_path.display());
                         match llm_state.load_model(llm_path) {
-                            Ok(()) => println!("[duo] LLM loaded"),
-                            Err(e) => println!("[duo] LLM failed: {e}"),
+                            Ok(()) => println!("[parla] LLM loaded"),
+                            Err(e) => println!("[parla] LLM failed: {e}"),
                         }
                     }
-                    Err(e) => println!("[duo] LLM model not found: {e}"),
+                    Err(e) => println!("[parla] LLM model not found: {e}"),
                 }
 
-                println!("[duo] all models loaded");
+                println!("[parla] all models loaded");
             });
 
             Ok(())
@@ -893,7 +893,7 @@ pub fn run() {
                 // Shut down the llama-server subprocess before the process exits.
                 // This is the primary cleanup path. LlmState::Drop is the backup.
                 if let Some(llm) = app.try_state::<LlmState>() {
-                    eprintln!("[duo] RunEvent::Exit — shutting down llama-server");
+                    eprintln!("[parla] RunEvent::Exit — shutting down llama-server");
                     llm.shutdown();
                 }
             }

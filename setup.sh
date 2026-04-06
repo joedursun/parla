@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Duo — Setup Script
+# Parla — Setup Script
 #
 # Downloads all required models for local development.
 # Idempotent: safe to re-run — skips files that already exist.
@@ -15,7 +15,7 @@ set -euo pipefail
 # ─── Configuration ──────────────────────────────────────────────────────────
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_DATA_DIR="$HOME/Library/Application Support/com.duo.app"
+APP_DATA_DIR="$HOME/Library/Application Support/com.parla.app"
 MODELS_DIR="$APP_DATA_DIR/models"
 VOICES_DIR="$MODELS_DIR/voices"
 TMP_DIR="$REPO_DIR/tmp"
@@ -79,7 +79,7 @@ fi
 # ─── Main ───────────────────────────────────────────────────────────────────
 
 echo ""
-echo "=== Duo Setup ==="
+echo "=== Parla Setup ==="
 echo ""
 echo "  Models dir: $MODELS_DIR"
 echo ""
@@ -110,7 +110,7 @@ echo ""
 #   1. If already in MODELS_DIR, skip.
 #   2. If the Hugging Face cache (shared with llama-server) has it, copy it in.
 #      On APFS this is a clonefile copy — near-instant, zero extra disk use.
-#   3. Otherwise prompt/download, unless DUO_SKIP_LLM=1 or --yes/--llm is set.
+#   3. Otherwise prompt/download, unless PARLA_SKIP_LLM=1 or --yes/--llm is set.
 
 # Find a Gemma Q4_K_M gguf in the HF cache. Looks in several repo names
 # (different uploaders publish the same weights). Returns the resolved path
@@ -167,11 +167,11 @@ else
                 fail "Failed to copy from HF cache"
             fi
         fi
-    elif [ "${DUO_SKIP_LLM:-}" = "1" ]; then
-        warn "Skipping Gemma download (DUO_SKIP_LLM=1)"
-        info "Re-run without DUO_SKIP_LLM or download manually:"
+    elif [ "${PARLA_SKIP_LLM:-}" = "1" ]; then
+        warn "Skipping Gemma download (PARLA_SKIP_LLM=1)"
+        info "Re-run without PARLA_SKIP_LLM or download manually:"
         info "  curl -L -o '$GEMMA_DEST' '$GEMMA_URL'"
-    elif [ "${DUO_YES:-}" = "1" ] || [ "${1:-}" = "--yes" ] || [ "${1:-}" = "--llm" ]; then
+    elif [ "${PARLA_YES:-}" = "1" ] || [ "${1:-}" = "--yes" ] || [ "${1:-}" = "--llm" ]; then
         download_if_missing "$GEMMA_URL" "$GEMMA_DEST" "$GEMMA_FILE (~15.5 GB)"
     else
         warn "Gemma 4 26B A4B Q4_K_M is ~15.5 GB — this is the biggest file."

@@ -11,8 +11,8 @@
 
 <nav class="sidebar">
 	<a class="sidebar-logo" href="/">
-		<div class="logo-icon">D</div>
-		Duo
+		<div class="logo-icon">P</div>
+		Parla
 	</a>
 
 	<a class="nav-item" class:active={pathname === '/'} href="/">

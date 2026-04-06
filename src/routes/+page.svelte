@@ -16,7 +16,7 @@
 			<h1>Welcome back, {userProfile.name}</h1>
 			<p>Learning {userProfile.targetLanguage}{#if flashcardsDueCount > 0} &middot; You have {flashcardsDueCount} card{flashcardsDueCount !== 1 ? 's' : ''} to review{/if}</p>
 		{:else}
-			<h1>Welcome to Duo</h1>
+			<h1>Welcome to Parla</h1>
 			<p>Set up your profile to get started</p>
 		{/if}
 	</div>

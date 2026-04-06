@@ -1,10 +1,10 @@
 [package]
-name = "duo"
+name = "parla"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "duo_lib"
+name = "parla_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
