@@ -1,36 +1,167 @@
 <script lang="ts">
-	import { audioStatus, startRecording, stopRecordingAndTranscribe, speakText, stopPlayback, type StopRecordingResult, type AudioStatus } from '$lib/audio';
+	import {
+		audioStatus,
+		startRecording,
+		stopRecordingAndTranscribe,
+		stopPlayback,
+		llmStatus,
+		type StopRecordingResult,
+		type AudioStatus,
+		type LlmStatus,
+	} from '$lib/audio';
+	import {
+		conversationTurn,
+		resetConversation,
+		cancelGeneration,
+		type ConversationTurnResult,
+		type NewVocabulary,
+		type GrammarNote,
+		type SuggestedResponse,
+	} from '$lib/conversation';
+	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import { onMount, onDestroy } from 'svelte';
 
 	let isRecording = $state(false);
 	let status: AudioStatus | null = $state(null);
+	let llm: LlmStatus | null = $state(null);
 	let lastRecording: StopRecordingResult | null = $state(null);
 	let processingAudio = $state(false);
+	let awaitingTutor = $state(false);
+	let textInput = $state('');
 
 	// Live conversation messages from actual voice interaction
 	let liveMessages: Message[] = $state([]);
 
+	// Context panel state, populated from the most recent LLM response
+	let contextVocab: NewVocabulary[] = $state([]);
+	let grammarNotes: GrammarNote[] = $state([]);
+	let suggestions: SuggestedResponse[] = $state([]);
+
+	// Currently-streaming tutor bubble (partial text as tokens arrive).
+	// We render this as a placeholder bubble until `tutor-message-done` fires.
+	let streamingRaw = $state('');
+	let streamingSentences: string[] = $state([]);
+
 	// Poll model readiness (models load in background at app startup)
 	let pollTimer: ReturnType<typeof setInterval>;
+	let unlisteners: UnlistenFn[] = [];
 
-	onMount(() => {
+	onMount(async () => {
 		pollTimer = setInterval(async () => {
 			try {
 				status = await audioStatus();
-				// Stop polling once everything is loaded
-				if (status.stt_ready && status.tts_ready && status.vad_active) {
+				llm = await llmStatus();
+				if (status.stt_ready && status.tts_ready && status.vad_active && llm.loaded) {
 					clearInterval(pollTimer);
 				}
 			} catch {}
 		}, 500);
+
+		// Subscribe to streaming events from the Rust LLM pipeline.
+		unlisteners.push(
+			await listen<string>('tutor-message-chunk', (e) => {
+				streamingRaw += e.payload;
+			})
+		);
+		unlisteners.push(
+			await listen<string>('tutor-sentence', (e) => {
+				streamingSentences = [...streamingSentences, e.payload];
+			})
+		);
+		unlisteners.push(
+			await listen<ConversationTurnResult>('tutor-message-done', (e) => {
+				applyTutorResponse(e.payload);
+				streamingRaw = '';
+				streamingSentences = [];
+			})
+		);
 	});
 
-	onDestroy(() => clearInterval(pollTimer));
+	onDestroy(() => {
+		clearInterval(pollTimer);
+		for (const un of unlisteners) un();
+	});
+
+	function applyTutorResponse(result: ConversationTurnResult) {
+		const parsed = result.parsed;
+		const target = result.tutor_target || (parsed?.tutor_message.target_lang ?? '');
+		const native = result.tutor_native || (parsed?.tutor_message.native_lang ?? '');
+
+		const msg: Message = {
+			role: 'tutor',
+			target,
+			translation: native,
+		};
+		if (parsed?.correction) {
+			msg.correction = {
+				wrong: parsed.correction.original,
+				right: parsed.correction.corrected,
+				explain: parsed.correction.explanation,
+			};
+		}
+		if (parsed?.new_vocabulary?.length) {
+			// Attach the first one inline; remaining go in the context panel.
+			const v = parsed.new_vocabulary[0];
+			msg.vocab = { word: v.target_text, meaning: v.native_text };
+		}
+
+		liveMessages = [...liveMessages, msg];
+
+		// Update context panel
+		if (parsed?.new_vocabulary?.length) {
+			const seen = new Set(contextVocab.map((v) => v.target_text));
+			const newOnes = parsed.new_vocabulary.filter((v) => !seen.has(v.target_text));
+			contextVocab = [...contextVocab, ...newOnes];
+		}
+		if (parsed?.grammar_note) {
+			const seen = new Set(grammarNotes.map((g) => g.title));
+			if (!seen.has(parsed.grammar_note.title)) {
+				grammarNotes = [...grammarNotes, parsed.grammar_note];
+			}
+		}
+		if (parsed?.suggested_responses?.length) {
+			suggestions = parsed.suggested_responses;
+		}
+
+		awaitingTutor = false;
+	}
+
+	async function sendStudentText(text: string) {
+		const trimmed = text.trim();
+		if (!trimmed) return;
+		liveMessages = [...liveMessages, { role: 'student', target: trimmed, translation: '' }];
+		awaitingTutor = true;
+		streamingRaw = '';
+		streamingSentences = [];
+		try {
+			// conversationTurn resolves after the tutor finishes — the intermediate
+			// streaming events update streamingRaw/streamingSentences for live UI.
+			await conversationTurn(trimmed);
+		} catch (e) {
+			console.error('conversation_turn failed:', e);
+			liveMessages = [
+				...liveMessages,
+				{
+					role: 'tutor',
+					target: `[Error: ${e}]`,
+					translation: '',
+				},
+			];
+			awaitingTutor = false;
+		}
+	}
+
+	async function onSendText() {
+		const t = textInput;
+		textInput = '';
+		await sendStudentText(t);
+	}
 
 	async function onMicDown() {
 		try {
-			// Barge-in: stop any current playback when user starts speaking
+			// Barge-in: stop playback and cancel any in-flight generation
 			stopPlayback().catch(() => {});
+			cancelGeneration().catch(() => {});
 			await startRecording();
 			isRecording = true;
 		} catch (e) {
@@ -46,26 +177,27 @@
 			const result = await stopRecordingAndTranscribe();
 			lastRecording = result;
 			if (result.transcription && result.transcription.trim()) {
-				const userText = result.transcription.trim();
-				liveMessages = [...liveMessages, {
-					role: 'student',
-					target: userText,
-					translation: '',
-				}];
-				// Stub tutor echo response — will be replaced by LLM in Phase 2
-				const echo = `I heard: "${userText}"`;
-				liveMessages = [...liveMessages, {
-					role: 'tutor',
-					target: echo,
-					translation: '',
-				}];
-				speakText(echo).catch(e => console.warn('TTS failed:', e));
+				await sendStudentText(result.transcription);
 			}
 		} catch (e) {
 			console.error('Failed to process recording:', e);
 		} finally {
 			processingAudio = false;
 		}
+	}
+
+	async function onNewConversation() {
+		await resetConversation();
+		liveMessages = [];
+		contextVocab = [];
+		grammarNotes = [];
+		suggestions = [];
+		streamingRaw = '';
+		streamingSentences = [];
+	}
+
+	function suggestionClick(s: SuggestedResponse) {
+		sendStudentText(s.target_lang);
 	}
 
 	type Message = {
@@ -76,55 +208,9 @@
 		vocab?: { word: string; meaning: string };
 	};
 
-	const messages: Message[] = [
-		{
-			role: 'tutor',
-			target: '\u00A1Hola! Hoy vamos a practicar como pedir comida en un restaurante. Imagina que estamos en un cafe en Madrid. Yo soy el mesero. \u00BFQue te gustaria ordenar?',
-			translation: "Hi! Today we're going to practice ordering food at a restaurant. Imagine we're at a cafe in Madrid. I'm the waiter. What would you like to order?",
-		},
-		{
-			role: 'student',
-			target: 'Hola! Me gustaria un cafe con leche, por favor.',
-			translation: 'Hi! I would like a coffee with milk, please.',
-		},
-		{
-			role: 'tutor',
-			target: '\u00A1Muy bien! Un cafe con leche, excelente eleccion. \u00BFY quieres algo para comer? Tenemos churros, tostadas, y tortilla espanola.',
-			translation: 'Very good! A coffee with milk, excellent choice. And do you want something to eat? We have churros, toast, and Spanish omelette.',
-			vocab: { word: 'tortilla espanola', meaning: 'Spanish omelette (potato & egg)' },
-		},
-		{
-			role: 'student',
-			target: 'Si, yo quiero los churros. \u00BFCuanto es?',
-			translation: 'Yes, I want the churros. How much is it?',
-			correction: {
-				wrong: '\u00BFCuanto es?',
-				right: '\u00BFCuanto cuesta?',
-				alt: '\u00BFCuanto cuestan?',
-				explain: 'When asking about prices, use costar (to cost). Since churros is plural, you\'d say \u00BFcuanto cuestan? \u2014 "how much do they cost?"'
-			},
-		},
-		{
-			role: 'tutor',
-			target: '\u00A1Buena eleccion! Los churros cuestan tres euros con cincuenta. \u00BFQuieres algo mas, o te traigo la cuenta?',
-			translation: 'Good choice! The churros cost three euros and fifty cents. Would you like anything else, or shall I bring you the bill?',
-		},
-	];
-
-	const contextVocab = [
-		{ word: 'me gustaria', meaning: 'I would like', isNew: false },
-		{ word: 'la cuenta', meaning: 'the bill', isNew: false },
-		{ word: 'cuanto cuesta', meaning: 'how much does it cost', isNew: true },
-		{ word: 'la eleccion', meaning: 'the choice', isNew: true },
-		{ word: 'algo mas', meaning: 'anything else', isNew: false },
-		{ word: 'tortilla espanola', meaning: 'Spanish omelette', isNew: true },
-	];
-
-	const suggestions = [
-		{ target: 'No, eso es todo. La cuenta, por favor.', native: "That's all. The bill, please." },
-		{ target: '\u00BFTienen algun postre?', native: 'Do you have any desserts?' },
-		{ target: 'Me gustaria tambien un vaso de agua.', native: 'I would also like a glass of water.' },
-	];
+	function canSend() {
+		return llm?.loaded && !awaitingTutor;
+	}
 </script>
 
 <div class="conversation-layout">
@@ -141,7 +227,11 @@
 			<div class="chat-header-actions">
 				<button class="btn btn-ghost btn-icon" title="Toggle translations">Aa</button>
 				<button class="btn btn-ghost btn-icon" title="Audio settings">&#x1F50A;</button>
-				<button class="btn btn-ghost btn-icon" title="More options">&#x22EE;</button>
+				<button
+					class="btn btn-ghost btn-icon"
+					title="Start new conversation"
+					onclick={onNewConversation}
+					aria-label="Start new conversation">&#x21BB;</button>
 			</div>
 		</div>
 
@@ -157,7 +247,17 @@
 		</div>
 
 		<div class="messages">
-			{#each messages as msg}
+			{#if liveMessages.length === 0 && !awaitingTutor}
+				<div class="empty-hint">
+					{#if llm?.loaded}
+						<p>Tap the mic or type to start a conversation with your Spanish tutor.</p>
+					{:else}
+						<p>Loading language model… this can take a moment on first launch.</p>
+					{/if}
+				</div>
+			{/if}
+
+			{#each liveMessages as msg}
 				<div class="message {msg.role}">
 					<div class="message-avatar">
 						{#if msg.role === 'tutor'}&#x1F393;{:else}J{/if}
@@ -169,13 +269,6 @@
 								<span class="translation">{msg.translation}</span>
 							{/if}
 						</div>
-						{#if msg.role === 'tutor'}
-							<div class="message-actions">
-								<button class="msg-action-btn">&#x1F50A; Listen</button>
-								<button class="msg-action-btn">&#x1F40C; Slow</button>
-								<button class="msg-action-btn">&#x1F441; Translation</button>
-							</div>
-						{/if}
 					</div>
 				</div>
 
@@ -186,9 +279,6 @@
 							<div>
 								<span class="wrong">{msg.correction.wrong}</span> &rarr;
 								<span class="right">{msg.correction.right}</span>
-								{#if msg.correction.alt}
-									or <span class="right">{msg.correction.alt}</span>
-								{/if}
 							</div>
 							<div class="explain">{msg.correction.explain}</div>
 						</div>
@@ -206,21 +296,22 @@
 				{/if}
 			{/each}
 
-			{#each liveMessages as msg}
-				<div class="message {msg.role}">
-					<div class="message-avatar">
-						{#if msg.role === 'tutor'}&#x1F393;{:else}J{/if}
-					</div>
+			{#if awaitingTutor}
+				<div class="message tutor">
+					<div class="message-avatar">&#x1F393;</div>
 					<div class="message-content">
-						<div class="bubble">
-							<span class="target-text">{msg.target}</span>
-							{#if msg.translation}
-								<span class="translation">{msg.translation}</span>
+						<div class="bubble streaming">
+							{#if streamingSentences.length > 0}
+								<span class="target-text">{streamingSentences.join(' ')}</span>
+							{:else if streamingRaw.length > 0}
+								<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
+							{:else}
+								<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
 							{/if}
 						</div>
 					</div>
 				</div>
-			{/each}
+			{/if}
 		</div>
 
 		<div class="chat-input-area">
@@ -237,19 +328,36 @@
 				</div>
 			{/if}
 			<div class="input-row">
-				<textarea rows="1" placeholder="Type in Spanish (or English to translate)..."></textarea>
+				<textarea
+					rows="1"
+					placeholder="Type in Spanish (or English to translate)..."
+					bind:value={textInput}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' && !e.shiftKey) {
+							e.preventDefault();
+							if (canSend()) onSendText();
+						}
+					}}
+				></textarea>
 				<div class="input-actions">
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<button
 						class="voice-btn"
 						class:recording={isRecording}
 						title={status?.stt_ready ? 'Hold to speak' : 'Loading models...'}
-						disabled={!status?.stt_ready}
+						disabled={!status?.stt_ready || awaitingTutor}
 						onpointerdown={onMicDown}
 						onpointerup={onMicUp}
 						onpointerleave={onMicUp}
+						aria-label="Hold to speak"
 					>&#x1F3A4;</button>
-					<button class="send-btn" title="Send message">&#x27A4;</button>
+					<button
+						class="send-btn"
+						title="Send message"
+						disabled={!canSend() || textInput.trim().length === 0}
+						onclick={onSendText}
+						aria-label="Send message"
+					>&#x27A4;</button>
 				</div>
 			</div>
 			<div class="input-hint">
@@ -257,10 +365,14 @@
 					<span class="recording-hint">Recording... release to stop</span>
 				{:else if processingAudio}
 					<span style="color: var(--primary);">Transcribing...</span>
+				{:else if awaitingTutor}
+					<span style="color: var(--primary);">Tutor is thinking...</span>
+				{:else if !llm?.loaded}
+					Loading language model...
 				{:else if !status?.stt_ready}
 					Loading speech recognition...
 				{:else}
-					Hold the mic button to speak
+					Hold the mic button to speak, or type and press Enter
 				{/if}
 			</div>
 		</div>
@@ -282,41 +394,49 @@
 
 		<div class="context-section">
 			<h4>&#x1F4D6; Vocabulary This Lesson</h4>
-			{#each contextVocab as item}
-				<div class="context-vocab-item">
-					<div>
-						<div class="context-vocab-word">{item.word}</div>
-						<div class="context-vocab-meaning">{item.meaning}</div>
-					</div>
-					{#if item.isNew}
+			{#if contextVocab.length === 0}
+				<p class="context-empty">New words will appear here as they come up.</p>
+			{:else}
+				{#each contextVocab as item}
+					<div class="context-vocab-item">
+						<div>
+							<div class="context-vocab-word">{item.target_text}</div>
+							<div class="context-vocab-meaning">{item.native_text}</div>
+						</div>
 						<span class="new-badge">New</span>
-					{/if}
-				</div>
-			{/each}
+					</div>
+				{/each}
+			{/if}
 		</div>
 
 		<div class="context-section">
 			<h4>&#x1F4DD; Grammar Notes</h4>
-			<div class="grammar-note">
-				<h4>Costar (to cost)</h4>
-				<p>Use <code>cuesta</code> for singular, <code>cuestan</code> for plural items.</p>
-			</div>
-			<div class="grammar-note">
-				<h4>Polite Ordering</h4>
-				<p><code>Me gustaria</code> (I would like) is more polite than <code>quiero</code> (I want) when ordering.</p>
-			</div>
+			{#if grammarNotes.length === 0}
+				<p class="context-empty">Grammar tips will appear here as the tutor teaches them.</p>
+			{:else}
+				{#each grammarNotes as g}
+					<div class="grammar-note">
+						<h4>{g.title}</h4>
+						<p>{g.explanation}</p>
+					</div>
+				{/each}
+			{/if}
 		</div>
 
 		<div class="context-section">
 			<h4>&#x1F4AC; Try Saying</h4>
-			<div class="suggestion-chips">
-				{#each suggestions as s}
-					<button class="suggestion-chip">
-						<div class="chip-text">{s.target}</div>
-						<div class="chip-hint">{s.native}</div>
-					</button>
-				{/each}
-			</div>
+			{#if suggestions.length === 0}
+				<p class="context-empty">Suggested replies will appear here.</p>
+			{:else}
+				<div class="suggestion-chips">
+					{#each suggestions as s}
+						<button class="suggestion-chip" onclick={() => suggestionClick(s)}>
+							<div class="chip-text">{s.target_lang}</div>
+							<div class="chip-hint">{s.native_lang}</div>
+						</button>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	</div>
 </div>
@@ -338,6 +458,14 @@
 	.text-xs { font-size: 0.75rem; }
 
 	.messages { flex: 1; overflow-y: auto; padding: var(--space-lg); display: flex; flex-direction: column; gap: var(--space-md); }
+	.empty-hint { color: var(--text-muted); text-align: center; padding: var(--space-lg); font-size: 0.875rem; }
+	.bubble.streaming { opacity: 0.85; }
+	.typing-dots { display: inline-flex; gap: 2px; }
+	.typing-dots span { animation: blink 1.2s infinite; font-weight: 700; }
+	.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+	.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+	@keyframes blink { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
+	.context-empty { font-size: 0.8125rem; color: var(--text-muted); font-style: italic; }
 
 	.message { display: flex; gap: var(--space-sm); max-width: 75%; animation: fadeIn 200ms ease; }
 	@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
@@ -410,7 +538,6 @@
 	.grammar-note:last-child { margin-bottom: 0; }
 	.grammar-note h4 { font-size: 0.875rem; font-weight: 600; margin-bottom: 4px; text-transform: none; letter-spacing: 0; color: var(--text); }
 	.grammar-note p { font-size: 0.8125rem; color: var(--text-secondary); line-height: 1.5; }
-	.grammar-note code { background: var(--primary-subtle); color: var(--primary); padding: 1px 5px; border-radius: 3px; font-family: var(--font); font-size: 0.8125rem; font-weight: 600; }
 
 	.suggestion-chips { display: flex; flex-direction: column; gap: var(--space-xs); }
 	.suggestion-chip { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm) var(--space-md); font-size: 0.8125rem; cursor: pointer; transition: all var(--transition); text-align: left; }

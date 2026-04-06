@@ -9,7 +9,7 @@ Phase 1 (audio pipeline) is complete: mic → VAD → STT → Kokoro TTS → spe
 - Add `llama-cpp-rs` crate (Rust bindings to llama.cpp)
 - Create `src-tauri/src/llm/mod.rs` module
 - Load Gemma 4 26B Q4_0 GGUF with full Metal GPU offload (`n_gpu_layers = -1`)
-- Enable flash attention, configure 8K context window
+- Enable flash attention, configure 32K context window
 - Implement streaming token generation, yielding tokens over a channel to the audio thread
 - Add `init_llm` Tauri command to load the model on startup
 - Add Gemma model download to `setup.sh`

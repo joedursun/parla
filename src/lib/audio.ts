@@ -23,7 +23,12 @@ export interface AudioStatus {
 export interface ModelStatus {
 	vad: boolean;
 	stt: boolean;
+	llm: boolean;
 	models_dir: string;
+}
+
+export interface LlmStatus {
+	loaded: boolean;
 }
 
 /** Start recording from the microphone. */
@@ -64,4 +69,9 @@ export async function audioStatus(): Promise<AudioStatus> {
 /** Check which models are available on disk. */
 export async function checkModels(): Promise<ModelStatus> {
 	return invoke('check_models');
+}
+
+/** Get LLM load status. */
+export async function llmStatus(): Promise<LlmStatus> {
+	return invoke('llm_status');
 }

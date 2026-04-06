@@ -33,14 +33,14 @@ See [app.md](app.md) for product vision, [data.md](data.md) for schema and LLM p
 | Component | Model | Est. Memory |
 |-----------|-------|-------------|
 | LLM | Gemma 4 26B Q4_0 | ~14 GB |
-| LLM KV cache | 8K context | ~2 GB |
+| LLM KV cache | 32K context | ~8 GB |
 | STT | Whisper large-v3 (GGUF) | ~3 GB |
 | VAD | Silero VAD v6 (ONNX) | ~2 MB |
 | TTS | Kokoro 82M (ONNX) | ~0.5 GB |
 | App + OS + headroom | — | ~10 GB |
-| **Total** | | **~31 GB** |
+| **Total** | | **~37 GB** |
 
-With 128 GB we have massive headroom. Q4_0 works well in practice and keeps the footprint small (~31 GB total), leaving ~97 GB free for OS and other apps.
+With 128 GB we have massive headroom. Q4_0 works well in practice and keeps the footprint small (~37 GB total), leaving ~91 GB free for OS and other apps.
 
 ---
 
@@ -102,7 +102,7 @@ The voice loop is the core experience and the hardest integration work. Get this
 - Integrate Gemma 4 26B via `llama-cpp-rs` (Rust bindings to llama.cpp)
 - Load Q4_0 GGUF with full Metal GPU offload (`n_gpu_layers = -1`)
 - Enable flash attention
-- Configure 8K context window
+- Configure 32K context window
 - Implement streaming token generation, yielding tokens over an async channel
 
 ### 2b: Structured conversation output
