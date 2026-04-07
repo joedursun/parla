@@ -163,6 +163,50 @@ pub fn build_system_prompt(
     prompt
 }
 
+/// Build a prompt for generating an initial learning path (10 lessons).
+pub fn build_lesson_generation_prompt(
+    target_language: &str,
+    native_language: &str,
+    level: &str,
+    goals: &[&str],
+) -> Vec<ChatMessage> {
+    let system = format!(
+        "You are a curriculum designer for language learning. \
+         Design a sequence of conversation-based lessons that build logically. \
+         Each lesson is a realistic scenario where the student practices vocabulary and grammar in context. \
+         Prioritize the student's goals when choosing topics and scenarios. \
+         Output ONLY a JSON array of lesson objects — no markdown fences, no prose."
+    );
+
+    let user = format!(
+        "Design 10 lessons for a student learning {target_language}.\n\n\
+         Student profile:\n\
+         - Native language: {native_language}\n\
+         - Current level: {level}\n\
+         - Goals: {goals}\n\
+         - Daily practice target: 15 minutes\n\n\
+         For each lesson, provide:\n\
+         - \"topic\": a slug like \"food_and_dining\" (lowercase, underscores)\n\
+         - \"title\": a short display title\n\
+         - \"description\": one sentence describing the lesson\n\
+         - \"scenario\": the realistic conversation situation\n\
+         - \"objectives\": array of 3-5 learning objectives\n\
+         - \"target_vocabulary\": array of 8-12 words/phrases to introduce (as strings)\n\
+         - \"target_grammar\": array of 1-3 grammar concept slugs to practice (as strings)\n\
+         - \"cefr_level\": the CEFR band for this lesson (same as student level or slightly above)\n\n\
+         Requirements:\n\
+         1. Order from simplest to most complex\n\
+         2. Reuse some vocabulary from earlier lessons while introducing new material\n\
+         3. Prioritize {goals_list} scenarios\n\
+         4. Each scenario should be a realistic situation (ordering food, asking directions, etc.)\n\n\
+         Output ONLY the JSON array.",
+        goals = goals.join(", "),
+        goals_list = goals.join(" and "),
+    );
+
+    vec![ChatMessage::system(system), ChatMessage::user(user)]
+}
+
 /// The JSON response format specification — shared across all prompt variants.
 const RESPONSE_FORMAT: &str = r#"## Response Format
 

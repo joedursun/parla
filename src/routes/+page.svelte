@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { store } from '$lib/stores.svelte';
+	import { startLesson } from '$lib/conversation';
+	import { goto } from '$app/navigation';
 
 	const userProfile = $derived(store.userProfile);
 	const lessons = $derived(store.lessons);
@@ -8,6 +10,23 @@
 	const dailyStats = $derived(store.dailyStats);
 	const flashcardsDueCount = $derived(store.flashcardsDueCount);
 	const currentLesson = $derived(store.currentLesson);
+
+	/** The next lesson the user should do. */
+	const nextLesson = $derived(lessons.find((l) => l.status === 'current'));
+
+	async function handleStartLesson(lessonId: number) {
+		try {
+			const result = await startLesson(lessonId);
+			store.currentLesson = {
+				title: result.title,
+				description: result.description,
+				tags: [result.cefrLevel, result.topic],
+			};
+			goto('/conversation');
+		} catch (e) {
+			console.error('Failed to start lesson:', e);
+		}
+	}
 </script>
 
 <div class="page-body">
@@ -22,19 +41,23 @@
 	</div>
 
 	<div class="action-grid">
-		<a class="action-card primary-action" href="/conversation">
-			<div class="action-icon">&#x1F393;</div>
-			<div>
-				<div class="action-title">{currentLesson ? 'Continue Lesson' : 'Start Conversation'}</div>
-				<div class="action-meta">
-					{#if currentLesson}
-						{currentLesson.title}
-					{:else}
-						Practice speaking with your tutor
-					{/if}
+		{#if nextLesson}
+			<button class="action-card primary-action" onclick={() => handleStartLesson(nextLesson.id)}>
+				<div class="action-icon">&#x1F393;</div>
+				<div>
+					<div class="action-title">Continue Lesson</div>
+					<div class="action-meta">{nextLesson.title}</div>
 				</div>
-			</div>
-		</a>
+			</button>
+		{:else}
+			<a class="action-card primary-action" href="/conversation">
+				<div class="action-icon">&#x1F393;</div>
+				<div>
+					<div class="action-title">Start Conversation</div>
+					<div class="action-meta">Practice speaking with your tutor</div>
+				</div>
+			</a>
+		{/if}
 		<a class="action-card" href="/flashcards">
 			<div class="action-icon cards">&#x1F0CF;</div>
 			<div>
@@ -92,10 +115,15 @@
 				{/if}
 			</div>
 			{#if lessons.length > 0}
-				{#each lessons as lesson}
-					<div class="lesson-item" class:current={lesson.status === 'current'}>
+				{#each lessons as lesson, i}
+					<button
+						class="lesson-item"
+						class:current={lesson.status === 'current'}
+						onclick={() => lesson.status === 'current' && handleStartLesson(lesson.id)}
+						disabled={lesson.status === 'upcoming'}
+					>
 						<div class="lesson-num" class:done={lesson.status === 'done'} class:active={lesson.status === 'current'} class:upcoming={lesson.status === 'upcoming'}>
-							{#if lesson.status === 'done'}&#x2713;{:else}{lesson.id}{/if}
+							{#if lesson.status === 'done'}&#x2713;{:else}{i + 1}{/if}
 						</div>
 						<div class="lesson-info">
 							<div class="lesson-title">{lesson.title}</div>
@@ -104,7 +132,7 @@
 						<div class="lesson-progress" class:complete={lesson.status === 'done'} style={lesson.status === 'current' ? 'color: var(--primary);' : ''}>
 							{lesson.progress}
 						</div>
-					</div>
+					</button>
 				{/each}
 			{:else}
 				<div class="empty-state">
@@ -200,8 +228,9 @@
 
 	.lesson-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
 	.lesson-card-header { padding: var(--space-lg); display: flex; align-items: center; justify-content: space-between; }
-	.lesson-item { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--border-light); cursor: pointer; transition: background var(--transition); }
-	.lesson-item:hover { background: var(--surface-hover); }
+	.lesson-item { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--border-light); cursor: pointer; transition: background var(--transition); width: 100%; background: transparent; border-left: none; border-right: none; border-bottom: none; color: inherit; font: inherit; text-align: left; }
+	.lesson-item:hover:not(:disabled) { background: var(--surface-hover); }
+	.lesson-item:disabled { cursor: default; opacity: 0.7; }
 	.lesson-item.current { background: var(--primary-subtle); border-left: 3px solid var(--primary); }
 	.lesson-num { width: 32px; height: 32px; border-radius: var(--radius-full); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.8125rem; flex-shrink: 0; }
 	.lesson-num.done { background: var(--success); color: white; }

@@ -8,7 +8,7 @@ mod vad;
 use audio::pipeline::AudioState;
 use db::Db;
 use llm::parser::{ParsedTutorResponse, StreamingJsonParser};
-use llm::prompt::{build_system_prompt, ChatMessage};
+use llm::prompt::{build_lesson_generation_prompt, build_system_prompt, ChatMessage};
 use llm::{GenChunk, LlmState};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -297,6 +297,8 @@ async fn create_profile(
     db: State<'_, Db>,
     history: State<'_, ConversationHistory>,
     target_lang_state: State<'_, TargetLanguage>,
+    llm: State<'_, LlmState>,
+    app: tauri::AppHandle,
     native_language: String,
     target_language: String,
     cefr_level: String,
@@ -311,13 +313,20 @@ async fn create_profile(
     let nl = native_language.clone();
     let cl = cefr_level.clone();
     let g = goals.clone();
-    tokio::task::spawn_blocking(move || {
+    let db2 = db.clone();
+    let result: ProfileResult = tokio::task::spawn_blocking(move || -> Result<ProfileResult, String> {
         db.create_profile(&db::NewProfile {
             native_language: nl.clone(),
             target_language: tl.clone(),
             cefr_level: cl.clone(),
             goals: g.clone(),
         })?;
+
+        // Seed grammar concepts for the selected language + level.
+        let concepts = db::grammar_seeds::grammar_concepts_for(&tl, &cl);
+        db.insert_grammar_concepts(&concepts)?;
+        println!("[parla] seeded {} grammar concepts for {} {}", concepts.len(), tl, cl);
+
         // Update the system prompt for the current session.
         let goal_refs: Vec<&str> = g.iter().map(|s| s.as_str()).collect();
         let prompt = build_system_prompt(&tl, "Learner", &nl, &cl, &goal_refs, None);
@@ -330,7 +339,26 @@ async fn create_profile(
         })
     })
     .await
-    .map_err(|e| format!("{e}"))?
+    .map_err(|e| format!("{e}"))??;
+
+    // Trigger lesson generation in background (non-blocking).
+    let llm = llm.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let goal_refs: Vec<&str> = goals.iter().map(|s| s.as_str()).collect();
+        if let Err(e) = generate_initial_lessons(
+            &llm,
+            &db2,
+            &app,
+            &target_language,
+            &native_language,
+            &cefr_level,
+            &goal_refs,
+        ) {
+            eprintln!("[parla] lesson generation failed: {e}");
+        }
+    });
+
+    Ok(result)
 }
 
 // ── Conversation list commands ────────────────────────────────────────────
@@ -437,6 +465,7 @@ async fn get_flashcards(db: State<'_, Db>) -> Result<Vec<FlashcardResult>, Strin
             .map(|r| {
                 let dots: Vec<bool> = (0..5).map(|i| i < r.review_count.min(5)).collect();
                 FlashcardResult {
+                    id: r.id,
                     word: r.word,
                     meaning: r.meaning,
                     pronunciation: r.pronunciation.unwrap_or_default(),
@@ -449,6 +478,145 @@ async fn get_flashcards(db: State<'_, Db>) -> Result<Vec<FlashcardResult>, Strin
                 }
             })
             .collect())
+    })
+    .await
+    .map_err(|e| format!("{e}"))?
+}
+
+// ── Lesson commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_lessons(db: State<'_, Db>) -> Result<Vec<LessonResult>, String> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let rows = db.get_lessons()?;
+        Ok(rows
+            .into_iter()
+            .map(|l| LessonResult {
+                id: l.id,
+                sequence_order: l.sequence_order,
+                title: l.title,
+                description: l.description.unwrap_or_default(),
+                status: l.status,
+                topic: l.topic,
+                cefr_level: l.cefr_level,
+                success_rate: l.success_rate,
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| format!("{e}"))?
+}
+
+/// Start a lesson: mark it as in_progress, create a lesson conversation,
+/// set the system prompt with lesson context, and return the lesson details.
+#[tauri::command]
+async fn start_lesson(
+    db: State<'_, Db>,
+    history: State<'_, ConversationHistory>,
+    lesson_id: i64,
+) -> Result<LessonResult, String> {
+    let db = db.inner().clone();
+    let history = history.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let lesson = db
+            .get_lesson(lesson_id)?
+            .ok_or_else(|| format!("lesson {lesson_id} not found"))?;
+
+        // Mark lesson as in_progress.
+        db.update_lesson_status(lesson_id, "in_progress", None)?;
+
+        // Create a conversation linked to this lesson.
+        let conv_id = db.create_lesson_conversation(lesson_id, &lesson.title)?;
+
+        // Reset conversation history and set the lesson conversation.
+        history.clear();
+        history.set_conversation_id(conv_id);
+
+        // Build system prompt with lesson context.
+        let profile = db
+            .get_profile()?
+            .ok_or("no profile")?;
+        let goals: Vec<String> =
+            serde_json::from_str(&profile.goals_json).unwrap_or_default();
+        let goal_refs: Vec<&str> = goals.iter().map(|s| s.as_str()).collect();
+
+        // Parse lesson vocabulary and grammar from JSON.
+        let vocab_items: Vec<String> =
+            serde_json::from_str(&lesson.target_vocabulary_json).unwrap_or_default();
+        let grammar_slugs: Vec<String> =
+            serde_json::from_str(&lesson.target_grammar_json).unwrap_or_default();
+        let objectives: Vec<String> =
+            serde_json::from_str(&lesson.objectives_json).unwrap_or_default();
+
+        use llm::prompt::{GrammarFocus, LessonContext, VocabItem};
+
+        let vocab_refs: Vec<VocabItem> = vocab_items
+            .iter()
+            .map(|v| VocabItem {
+                target: v.as_str(),
+                native: "", // LLM will figure out translations
+            })
+            .collect();
+        let grammar_refs: Vec<GrammarFocus> = grammar_slugs
+            .iter()
+            .map(|g| GrammarFocus {
+                title: g.as_str(),
+                explanation: "",
+            })
+            .collect();
+        let obj_refs: Vec<&str> = objectives.iter().map(|s| s.as_str()).collect();
+
+        let lesson_ctx = LessonContext {
+            topic: &lesson.title,
+            scenario: lesson.scenario.as_deref().unwrap_or(""),
+            objectives: &obj_refs,
+            vocabulary: &vocab_refs,
+            grammar: &grammar_refs,
+        };
+
+        let prompt = build_system_prompt(
+            &profile.target_language,
+            "Learner",
+            &profile.native_language,
+            &profile.cefr_level,
+            &goal_refs,
+            Some(&lesson_ctx),
+        );
+        history.set_system_prompt(prompt);
+
+        Ok(LessonResult {
+            id: lesson.id,
+            sequence_order: lesson.sequence_order,
+            title: lesson.title,
+            description: lesson.description.unwrap_or_default(),
+            status: "in_progress".into(),
+            topic: lesson.topic,
+            cefr_level: lesson.cefr_level,
+            success_rate: lesson.success_rate,
+        })
+    })
+    .await
+    .map_err(|e| format!("{e}"))?
+}
+
+// ── Flashcard review commands ───────────────────────────────────────
+
+#[tauri::command]
+async fn review_flashcard(
+    db: State<'_, Db>,
+    app: tauri::AppHandle,
+    flashcard_id: i64,
+    rating: String,
+    response_time_ms: Option<i64>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        db.review_flashcard(flashcard_id, &rating, response_time_ms)?;
+        // Re-emit due count.
+        let due = db.flashcards_due_count().unwrap_or(0);
+        let _ = app.emit("flashcards-due-count", due);
+        Ok(())
     })
     .await
     .map_err(|e| format!("{e}"))?
@@ -698,6 +866,105 @@ fn generate_conversation_title(
     }
 }
 
+/// Generate initial learning path (10 lessons) via LLM and persist to DB.
+fn generate_initial_lessons(
+    llm: &LlmState,
+    db: &Db,
+    app: &tauri::AppHandle,
+    target_language: &str,
+    native_language: &str,
+    level: &str,
+    goals: &[&str],
+) -> Result<(), String> {
+    println!("[parla] generating initial learning path...");
+    let messages = build_lesson_generation_prompt(target_language, native_language, level, goals);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let rx = llm.generate(messages, cancel)?;
+
+    let mut full_text = String::new();
+    loop {
+        match rx.recv() {
+            Ok(GenChunk::Text(t)) => full_text.push_str(&t),
+            Ok(GenChunk::Done { full_text: ft }) => {
+                full_text = ft;
+                break;
+            }
+            Ok(GenChunk::Error(e)) => return Err(e),
+            Err(_) => break,
+        }
+    }
+
+    // Extract JSON array from response (may have surrounding text).
+    let json_start = full_text.find('[').ok_or("no JSON array in LLM response")?;
+    let json_end = full_text.rfind(']').ok_or("no closing ] in LLM response")? + 1;
+    let json_str = &full_text[json_start..json_end];
+
+    let lessons: Vec<serde_json::Value> =
+        serde_json::from_str(json_str).map_err(|e| format!("parse lessons JSON: {e}"))?;
+
+    let mut new_lessons = Vec::new();
+    for (i, lesson) in lessons.iter().enumerate() {
+        new_lessons.push(db::NewLesson {
+            sequence_order: (i + 1) as i32,
+            cefr_level: lesson["cefr_level"]
+                .as_str()
+                .unwrap_or(level)
+                .to_string(),
+            topic: lesson["topic"]
+                .as_str()
+                .unwrap_or("general")
+                .to_string(),
+            title: lesson["title"]
+                .as_str()
+                .unwrap_or("Untitled Lesson")
+                .to_string(),
+            description: lesson["description"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            scenario: lesson["scenario"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            objectives_json: serde_json::to_string(&lesson["objectives"]).unwrap_or("[]".into()),
+            target_vocabulary_json: serde_json::to_string(&lesson["target_vocabulary"])
+                .unwrap_or("[]".into()),
+            target_grammar_json: serde_json::to_string(&lesson["target_grammar"])
+                .unwrap_or("[]".into()),
+        });
+    }
+
+    db.insert_lessons(&new_lessons)?;
+    println!("[parla] generated and stored {} lessons", new_lessons.len());
+
+    // Emit lessons to frontend.
+    emit_lessons(db, app);
+
+    Ok(())
+}
+
+/// Emit the current lesson list to the frontend.
+fn emit_lessons(db: &Db, app: &tauri::AppHandle) {
+    if let Ok(lessons) = db.get_lessons() {
+        let list: Vec<serde_json::Value> = lessons
+            .into_iter()
+            .map(|l| {
+                serde_json::json!({
+                    "id": l.id,
+                    "sequenceOrder": l.sequence_order,
+                    "title": l.title,
+                    "description": l.description.unwrap_or_default(),
+                    "status": l.status,
+                    "topic": l.topic,
+                    "cefrLevel": l.cefr_level,
+                    "successRate": l.success_rate,
+                })
+            })
+            .collect();
+        let _ = app.emit("lessons-updated", list);
+    }
+}
+
 /// Persist one conversation turn (student + tutor messages, corrections,
 /// vocabulary, flashcards) to SQLite. Called in a background task so it
 /// never blocks the voice loop.
@@ -841,6 +1108,11 @@ fn persist_turn(
         let _ = app.emit("recent-conversations", list);
     }
 
+    // Update daily stats.
+    let new_vocab = result.parsed.as_ref().map_or(0, |p| p.new_vocabulary.len() as i32);
+    let corrections = if result.parsed.as_ref().and_then(|p| p.correction.as_ref()).is_some() { 1 } else { 0 };
+    let _ = db.update_daily_stats(new_vocab, corrections, 1);
+
     // Suppress unused variable warning for tutor_msg_id.
     let _ = tutor_msg_id;
 
@@ -935,6 +1207,7 @@ struct LoadedMessage {
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FlashcardResult {
+    id: i64,
     word: String,
     meaning: String,
     pronunciation: String,
@@ -944,6 +1217,19 @@ struct FlashcardResult {
     status: String,
     next_review: String,
     dots: Vec<bool>,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LessonResult {
+    id: i64,
+    sequence_order: i32,
+    title: String,
+    description: String,
+    status: String,
+    topic: String,
+    cefr_level: String,
+    success_rate: Option<f64>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -1186,6 +1472,9 @@ pub fn run() {
             rename_conversation,
             delete_conversation,
             get_flashcards,
+            get_lessons,
+            start_lesson,
+            review_flashcard,
             load_conversation,
             conversation_turn,
             reset_conversation,

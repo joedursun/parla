@@ -20,10 +20,14 @@ export interface UserProfile {
 
 export interface Lesson {
 	id: number;
+	sequenceOrder: number;
 	title: string;
 	description: string;
 	status: 'done' | 'current' | 'upcoming';
 	progress: string; // "Done", "60%", "Upcoming"
+	topic: string;
+	cefrLevel: string;
+	successRate: number | null;
 }
 
 export interface VocabWord {
@@ -44,6 +48,7 @@ export interface LessonFocus {
 }
 
 export interface FlashcardSummary {
+	id: number;
 	word: string;
 	meaning: string;
 	pronunciation: string;
@@ -150,4 +155,8 @@ export function setFlashcardsDueCount(n: number) {
 
 export function setFlashcards(f: FlashcardSummary[]) {
 	store.flashcards = f;
+}
+
+export function setLessons(lessons: Lesson[]) {
+	store.lessons = lessons;
 }

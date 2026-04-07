@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parla — Settings</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .page-body {
+      max-width: 820px;
+      margin: 0 auto;
+    }
+
+    /* ---- Section headers ---- */
+    .settings-section {
+      margin-bottom: var(--space-2xl);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-lg);
+    }
+
+    .section-header h2 {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .section-header .section-icon {
+      font-size: 1.25rem;
+    }
+
+    .section-desc {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    /* ---- Language profile cards ---- */
+    .language-profiles {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-md);
+    }
+
+    .profile-card {
+      background: var(--surface);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+      cursor: pointer;
+      transition: all var(--transition);
+      position: relative;
+    }
+
+    .profile-card:hover {
+      border-color: var(--primary-light);
+      box-shadow: var(--shadow-md);
+    }
+
+    .profile-card.active {
+      border-color: var(--primary);
+      background: var(--primary-subtle);
+    }
+
+    .profile-card-header {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      margin-bottom: var(--space-md);
+    }
+
+    .profile-flag {
+      font-size: 2.25rem;
+      line-height: 1;
+    }
+
+    .profile-title {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .profile-title h3 {
+      font-size: 1.125rem;
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .profile-title .active-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: var(--radius-full);
+      background: var(--success);
+      flex-shrink: 0;
+    }
+
+    .profile-title .native-label {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .profile-level {
+      flex-shrink: 0;
+    }
+
+    /* Stats row inside profile card */
+    .profile-stats {
+      display: flex;
+      gap: var(--space-lg);
+      padding-top: var(--space-md);
+      border-top: 1px solid var(--border-light);
+    }
+
+    .active .profile-stats {
+      border-top-color: rgba(91, 79, 196, 0.15);
+    }
+
+    .profile-stat {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .profile-stat .p-stat-value {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .profile-stat .p-stat-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Profile card actions (visible on hover) */
+    .profile-actions {
+      position: absolute;
+      top: var(--space-md);
+      right: var(--space-md);
+      display: flex;
+      gap: var(--space-xs);
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+
+    .profile-card:hover .profile-actions {
+      opacity: 1;
+    }
+
+    .profile-actions .btn-icon {
+      width: 28px;
+      height: 28px;
+      font-size: 0.8125rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+
+    .profile-actions .btn-icon:hover {
+      color: var(--text);
+      border-color: var(--text-muted);
+    }
+
+    .profile-actions .btn-icon.danger:hover {
+      color: var(--danger);
+      border-color: var(--danger);
+    }
+
+    /* Active badge */
+    .active-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 10px;
+      border-radius: var(--radius-full);
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: var(--success-subtle);
+      color: var(--success);
+    }
+
+    .switch-label {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--primary);
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+
+    .profile-card:not(.active):hover .switch-label {
+      opacity: 1;
+    }
+
+    /* Add language card */
+    .add-language-card {
+      background: var(--surface);
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+      cursor: pointer;
+      transition: all var(--transition);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 170px;
+      gap: var(--space-sm);
+    }
+
+    .add-language-card:hover {
+      border-color: var(--primary-light);
+      background: var(--primary-subtle);
+    }
+
+    .add-language-card .add-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-full);
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      color: var(--text-muted);
+      transition: all var(--transition);
+    }
+
+    .add-language-card:hover .add-icon {
+      background: var(--primary);
+      color: white;
+    }
+
+    .add-language-card .add-text {
+      font-weight: 600;
+      font-size: 0.9375rem;
+      color: var(--text-secondary);
+    }
+
+    .add-language-card .add-subtext {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+
+    /* ---- Preferences section ---- */
+    .pref-list {
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+
+    .pref-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-md) var(--space-lg);
+    }
+
+    .pref-item + .pref-item {
+      border-top: 1px solid var(--border-light);
+    }
+
+    .pref-label {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .pref-label .pref-name {
+      font-weight: 600;
+      font-size: 0.9375rem;
+    }
+
+    .pref-label .pref-desc {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+
+    .pref-control {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    /* Simple inline text/select inputs */
+    .pref-input {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: var(--space-xs) var(--space-md);
+      font-family: var(--font);
+      font-size: 0.875rem;
+      color: var(--text);
+      background: var(--surface);
+      outline: none;
+      transition: border-color var(--transition);
+      width: 200px;
+      text-align: right;
+    }
+
+    .pref-input:focus {
+      border-color: var(--primary);
+    }
+
+    select.pref-input {
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%236B6777' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: var(--space-xl);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .pref-input-small {
+      width: 80px;
+      text-align: center;
+    }
+
+    .pref-unit {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+
+    /* ---- Danger zone ---- */
+    .danger-zone {
+      border-color: #F5C6C6;
+    }
+
+    .danger-zone .pref-item:hover {
+      background: #FDF0F0;
+    }
+
+    /* ---- Inline add-language flow (shown when "Add Language" is clicked) ---- */
+    .add-language-flow {
+      background: var(--surface);
+      border: 2px solid var(--primary);
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+      grid-column: 1 / -1;
+    }
+
+    .add-flow-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-lg);
+    }
+
+    .add-flow-header h3 {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .add-flow-close {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-full);
+      border: none;
+      background: var(--bg);
+      color: var(--text-muted);
+      font-size: 1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--transition);
+    }
+
+    .add-flow-close:hover {
+      background: var(--border);
+      color: var(--text);
+    }
+
+    .mini-language-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--space-sm);
+      margin-bottom: var(--space-lg);
+    }
+
+    .mini-lang-option {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--space-xs);
+      padding: var(--space-md);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-lg);
+      cursor: pointer;
+      transition: all var(--transition);
+      background: var(--surface);
+    }
+
+    .mini-lang-option:hover {
+      border-color: var(--primary-light);
+      background: var(--primary-subtle);
+    }
+
+    .mini-lang-option.selected {
+      border-color: var(--primary);
+      background: var(--primary-subtle);
+    }
+
+    .mini-lang-option.disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    .mini-lang-option .mini-flag {
+      font-size: 1.5rem;
+      line-height: 1;
+    }
+
+    .mini-lang-option .mini-name {
+      font-weight: 600;
+      font-size: 0.8125rem;
+    }
+
+    .mini-lang-option .mini-exists {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+    }
+
+    /* Level quick-pick (horizontal) */
+    .level-quick-pick {
+      display: flex;
+      gap: var(--space-sm);
+      margin-bottom: var(--space-lg);
+    }
+
+    .level-chip {
+      flex: 1;
+      padding: var(--space-sm) var(--space-md);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      text-align: center;
+      transition: all var(--transition);
+      background: var(--surface);
+    }
+
+    .level-chip:hover {
+      border-color: var(--primary-light);
+    }
+
+    .level-chip.selected {
+      border-color: var(--primary);
+      background: var(--primary-subtle);
+    }
+
+    .level-chip .chip-code {
+      font-weight: 700;
+      font-size: 0.9375rem;
+    }
+
+    .level-chip .chip-label {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+
+    .add-flow-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: var(--space-sm);
+    }
+
+    /* ---- Sidebar active state for Settings ---- */
+    .sidebar-footer .nav-item.active {
+      background: var(--primary-subtle);
+      color: var(--primary);
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <a class="sidebar-logo" href="#">
+        <div class="logo-icon">P</div>
+        Parla
+      </a>
+
+      <a class="nav-item" href="02-dashboard.html">
+        <span class="nav-icon">&#x2302;</span>
+        Dashboard
+      </a>
+      <a class="nav-item" href="03-conversation.html">
+        <span class="nav-icon">&#x1F4AC;</span>
+        Conversations
+      </a>
+      <a class="nav-item" href="04-flashcards.html">
+        <span class="nav-icon">&#x1F0CF;</span>
+        Flashcards
+        <span class="badge">12</span>
+      </a>
+      <a class="nav-item" href="05-progress.html">
+        <span class="nav-icon">&#x1F4CA;</span>
+        Progress
+      </a>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Recent Conversations</div>
+        <a class="nav-item" href="#">
+          <span class="nav-icon">&#x1F4AC;</span>
+          <span class="truncate">Ordering at a cafe</span>
+        </a>
+        <a class="nav-item" href="#">
+          <span class="nav-icon">&#x1F4AC;</span>
+          <span class="truncate">Asking for directions</span>
+        </a>
+      </div>
+
+      <div class="sidebar-footer">
+        <a class="nav-item active" href="06-settings.html">
+          <span class="nav-icon">&#x2699;</span>
+          Settings
+        </a>
+        <div class="user-card">
+          <div class="user-avatar">J</div>
+          <div class="user-info">
+            <div class="user-name">Joe</div>
+            <div class="user-level">Learning Korean</div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main -->
+    <main class="main-content">
+      <div class="page-header">
+        <h1>Settings</h1>
+      </div>
+
+      <div class="page-body">
+        <!-- ======== MY LANGUAGES ======== -->
+        <div class="settings-section">
+          <div class="section-header">
+            <div>
+              <h2>
+                <span class="section-icon">&#x1F30D;</span>
+                My Languages
+              </h2>
+              <p class="section-desc">Each language has its own lessons, vocabulary, and progress. Switch anytime.</p>
+            </div>
+          </div>
+
+          <div class="language-profiles">
+            <!-- Active profile -->
+            <div class="profile-card active">
+              <div class="profile-actions">
+                <button class="btn btn-icon" title="Edit goals">&#x270F;</button>
+              </div>
+
+              <div class="profile-card-header">
+                <span class="profile-flag">&#x1F1F0;&#x1F1F7;</span>
+                <div class="profile-title">
+                  <h3>
+                    Korean
+                    <span class="active-dot"></span>
+                  </h3>
+                  <div class="native-label">from English</div>
+                </div>
+                <span class="tag tag-success">A1</span>
+              </div>
+
+              <div class="profile-stats">
+                <div class="profile-stat">
+                  <span class="p-stat-value">47</span>
+                  <span class="p-stat-label">Words</span>
+                </div>
+                <div class="profile-stat">
+                  <span class="p-stat-value">6</span>
+                  <span class="p-stat-label">Lessons</span>
+                </div>
+                <div class="profile-stat">
+                  <span class="p-stat-value">14</span>
+                  <span class="p-stat-label">Day streak</span>
+                </div>
+                <div class="profile-stat">
+                  <span class="p-stat-value">72%</span>
+                  <span class="p-stat-label">Accuracy</span>
+                </div>
+              </div>
+
+              <div style="margin-top: var(--space-md); display: flex; justify-content: space-between; align-items: center;">
+                <span class="active-badge">&#x2713; Active</span>
+                <span class="text-xs text-muted">Started Mar 23</span>
+              </div>
+            </div>
+
+            <!-- Inactive profile -->
+            <div class="profile-card">
+              <div class="profile-actions">
+                <button class="btn btn-icon" title="Edit goals">&#x270F;</button>
+                <button class="btn btn-icon danger" title="Delete profile">&#x2715;</button>
+              </div>
+
+              <div class="profile-card-header">
+                <span class="profile-flag">&#x1F1EA;&#x1F1F8;</span>
+                <div class="profile-title">
+                  <h3>Spanish</h3>
+                  <div class="native-label">from English</div>
+                </div>
+                <span class="tag tag-warning">A2</span>
+              </div>
+
+              <div class="profile-stats">
+                <div class="profile-stat">
+                  <span class="p-stat-value">187</span>
+                  <span class="p-stat-label">Words</span>
+                </div>
+                <div class="profile-stat">
+                  <span class="p-stat-value">12</span>
+                  <span class="p-stat-label">Lessons</span>
+                </div>
+                <div class="profile-stat">
+                  <span class="p-stat-value">0</span>
+                  <span class="p-stat-label">Day streak</span>
+                </div>
+                <div class="profile-stat">
+                  <span class="p-stat-value">78%</span>
+                  <span class="p-stat-label">Accuracy</span>
+                </div>
+              </div>
+
+              <div style="margin-top: var(--space-md); display: flex; justify-content: space-between; align-items: center;">
+                <span class="switch-label">Click to switch &#x2192;</span>
+                <span class="text-xs text-muted">Started Feb 10</span>
+              </div>
+            </div>
+
+            <!-- Add language card -->
+            <div class="add-language-card">
+              <div class="add-icon">+</div>
+              <span class="add-text">Add Language</span>
+              <span class="add-subtext">Start learning something new</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======== ADD LANGUAGE FLOW (shown when clicking "Add Language") ======== -->
+        <div class="settings-section">
+          <div class="section-header">
+            <div>
+              <h2>
+                <span class="section-icon">&#x2795;</span>
+                Adding a new language
+              </h2>
+              <p class="section-desc">This is what appears inline when you click "Add Language" above.</p>
+            </div>
+          </div>
+
+          <div class="language-profiles">
+            <div class="add-language-flow">
+              <div class="add-flow-header">
+                <h3>
+                  <span style="font-size: 1.25rem;">&#x1F30D;</span>
+                  Add a new language
+                </h3>
+                <button class="add-flow-close">&#x2715;</button>
+              </div>
+
+              <!-- Step 1: Pick language -->
+              <div style="margin-bottom: var(--space-sm);">
+                <h4 style="margin-bottom: var(--space-sm);">Choose a language</h4>
+              </div>
+
+              <div class="mini-language-grid">
+                <div class="mini-lang-option disabled">
+                  <span class="mini-flag">&#x1F1F0;&#x1F1F7;</span>
+                  <span class="mini-name">Korean</span>
+                  <span class="mini-exists">Already added</span>
+                </div>
+                <div class="mini-lang-option disabled">
+                  <span class="mini-flag">&#x1F1EA;&#x1F1F8;</span>
+                  <span class="mini-name">Spanish</span>
+                  <span class="mini-exists">Already added</span>
+                </div>
+                <div class="mini-lang-option selected">
+                  <span class="mini-flag">&#x1F1EF;&#x1F1F5;</span>
+                  <span class="mini-name">Japanese</span>
+                </div>
+                <div class="mini-lang-option">
+                  <span class="mini-flag">&#x1F1EB;&#x1F1F7;</span>
+                  <span class="mini-name">French</span>
+                </div>
+                <div class="mini-lang-option">
+                  <span class="mini-flag">&#x1F1E9;&#x1F1EA;</span>
+                  <span class="mini-name">German</span>
+                </div>
+                <div class="mini-lang-option">
+                  <span class="mini-flag">&#x1F1EE;&#x1F1F9;</span>
+                  <span class="mini-name">Italian</span>
+                </div>
+                <div class="mini-lang-option">
+                  <span class="mini-flag">&#x1F1F5;&#x1F1F9;</span>
+                  <span class="mini-name">Portuguese</span>
+                </div>
+                <div class="mini-lang-option">
+                  <span class="mini-flag">&#x1F1E8;&#x1F1F3;</span>
+                  <span class="mini-name">Mandarin</span>
+                </div>
+              </div>
+
+              <!-- Step 2: Pick level -->
+              <div style="margin-bottom: var(--space-sm);">
+                <h4 style="margin-bottom: var(--space-sm);">Your level in Japanese</h4>
+              </div>
+
+              <div class="level-quick-pick">
+                <div class="level-chip selected">
+                  <div class="chip-code">A1</div>
+                  <div class="chip-label">Beginner</div>
+                </div>
+                <div class="level-chip">
+                  <div class="chip-code">A2</div>
+                  <div class="chip-label">Elementary</div>
+                </div>
+                <div class="level-chip">
+                  <div class="chip-code">B1</div>
+                  <div class="chip-label">Intermediate</div>
+                </div>
+                <div class="level-chip">
+                  <div class="chip-code">B2+</div>
+                  <div class="chip-label">Advanced</div>
+                </div>
+              </div>
+
+              <div class="add-flow-actions">
+                <button class="btn btn-secondary">Cancel</button>
+                <button class="btn btn-primary">Add Japanese &#x2192;</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======== PREFERENCES ======== -->
+        <div class="settings-section">
+          <div class="section-header">
+            <div>
+              <h2>
+                <span class="section-icon">&#x2699;</span>
+                Preferences
+              </h2>
+            </div>
+          </div>
+
+          <div class="pref-list">
+            <div class="pref-item">
+              <div class="pref-label">
+                <span class="pref-name">Display Name</span>
+                <span class="pref-desc">How the tutor addresses you</span>
+              </div>
+              <div class="pref-control">
+                <input type="text" class="pref-input" value="Joe">
+              </div>
+            </div>
+
+            <div class="pref-item">
+              <div class="pref-label">
+                <span class="pref-name">Daily Goal</span>
+                <span class="pref-desc">Minutes per day for streak tracking</span>
+              </div>
+              <div class="pref-control">
+                <input type="number" class="pref-input pref-input-small" value="15" min="5" max="120" step="5">
+                <span class="pref-unit">min</span>
+              </div>
+            </div>
+
+            <div class="pref-item">
+              <div class="pref-label">
+                <span class="pref-name">TTS Voice</span>
+                <span class="pref-desc">Voice used for tutor speech and pronunciation</span>
+              </div>
+              <div class="pref-control">
+                <select class="pref-input">
+                  <option>Default (af_heart)</option>
+                  <option>af_bella</option>
+                  <option>af_nicole</option>
+                  <option>am_adam</option>
+                  <option>am_michael</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="pref-item">
+              <div class="pref-label">
+                <span class="pref-name">TTS Speed</span>
+                <span class="pref-desc">Playback speed for tutor speech</span>
+              </div>
+              <div class="pref-control">
+                <select class="pref-input" style="width: 120px;">
+                  <option>0.75x (Slow)</option>
+                  <option selected>1.0x (Normal)</option>
+                  <option>1.25x (Fast)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="pref-item">
+              <div class="pref-label">
+                <span class="pref-name">Auto-play TTS</span>
+                <span class="pref-desc">Automatically speak tutor responses</span>
+              </div>
+              <div class="pref-control">
+                <!-- Simple toggle using CSS -->
+                <div style="width: 44px; height: 24px; border-radius: 12px; background: var(--primary); padding: 2px; cursor: pointer;">
+                  <div style="width: 20px; height: 20px; border-radius: 50%; background: white; margin-left: 20px; transition: margin var(--transition);"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="pref-item">
+              <div class="pref-label">
+                <span class="pref-name">New Flashcards Per Day</span>
+                <span class="pref-desc">Maximum new cards introduced in each review session</span>
+              </div>
+              <div class="pref-control">
+                <input type="number" class="pref-input pref-input-small" value="20" min="5" max="50" step="5">
+                <span class="pref-unit">cards</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======== ABOUT ======== -->
+        <div class="settings-section">
+          <div class="section-header">
+            <div>
+              <h2>
+                <span class="section-icon">&#x2139;</span>
+                About
+              </h2>
+            </div>
+          </div>
+
+          <div class="pref-list">
+            <div class="pref-item">
+              <div class="pref-label">
+                <span class="pref-name">Version</span>
+              </div>
+              <div class="pref-control">
+                <span class="text-sm text-muted">0.1.0</span>
+              </div>
+            </div>
+            <div class="pref-item">
+              <div class="pref-label">
+                <span class="pref-name">Models</span>
+                <span class="pref-desc">LLM, STT, and TTS models running locally</span>
+              </div>
+              <div class="pref-control">
+                <span class="text-sm text-muted">Gemma 4 26B &middot; Whisper large-v3 &middot; Kokoro 82M</span>
+              </div>
+            </div>
+            <div class="pref-item">
+              <div class="pref-label">
+                <span class="pref-name">Database</span>
+                <span class="pref-desc">Local SQLite storage</span>
+              </div>
+              <div class="pref-control">
+                <span class="text-sm text-muted">~2.4 MB &middot; 3 profiles &middot; 234 vocabulary items</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</body>
+</html>

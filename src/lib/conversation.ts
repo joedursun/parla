@@ -119,6 +119,7 @@ export async function deleteConversation(conversationId: number): Promise<void> 
 // ── Flashcards ──────────────────────────────────────────────────────
 
 export interface FlashcardResult {
+	id: number;
 	word: string;
 	meaning: string;
 	pronunciation: string;
@@ -156,4 +157,38 @@ export async function resetConversation(): Promise<void> {
 /** Cancel any in-flight LLM generation. */
 export async function cancelGeneration(): Promise<void> {
 	await invoke('cancel_generation');
+}
+
+// ── Lessons ─────────────────────────────────────────────────────────────
+
+export interface LessonResult {
+	id: number;
+	sequenceOrder: number;
+	title: string;
+	description: string;
+	status: string;
+	topic: string;
+	cefrLevel: string;
+	successRate: number | null;
+}
+
+/** Fetch all lessons ordered by sequence. */
+export async function getLessons(): Promise<LessonResult[]> {
+	return invoke('get_lessons');
+}
+
+/** Start a lesson: marks it in_progress, sets the system prompt with lesson context. */
+export async function startLesson(lessonId: number): Promise<LessonResult> {
+	return invoke('start_lesson', { lessonId });
+}
+
+// ── Flashcard review ────────────────────────────────────────────────────
+
+/** Submit a flashcard review rating. Updates SRS state in the database. */
+export async function reviewFlashcard(
+	flashcardId: number,
+	rating: string,
+	responseTimeMs?: number,
+): Promise<void> {
+	return invoke('review_flashcard', { flashcardId, rating, responseTimeMs });
 }

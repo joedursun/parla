@@ -8,6 +8,12 @@ All models run locally. Your conversations, progress, and data never leave your 
 
 ![Conversation](screenshots/conversation.png)
 
+![Flashcard List View](screenshots/flashcard-list.png)
+
+![Flashcard Front](screenshots/flashcard-front.png)
+
+![Flashcard Back](screenshots/flashcard-back.png)
+
 ## How It Works
 
 You choose a target language and tell the tutor what you're learning for (travel, work, culture, etc.). Then you have back-and-forth conversations — by typing or speaking — while the tutor plays roles (a waiter, a shopkeeper, a new friend) to create realistic situations.

@@ -5,14 +5,17 @@
 	import { goto } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-	import { getProfile, getRecentConversations } from '$lib/conversation';
+	import { getProfile, getRecentConversations, getLessons } from '$lib/conversation';
+	import type { LessonResult } from '$lib/conversation';
 	import {
 		setUserProfile,
 		setFlashcardsDueCount,
 		setRecentVocabulary,
 		setRecentConversations,
+		setLessons,
 		type VocabWord,
 		type RecentConversation,
+		type Lesson,
 	} from '$lib/stores.svelte';
 
 	let { children } = $props();
@@ -41,10 +44,14 @@
 		}
 		ready = true;
 
-		// Load recent conversations from DB.
+		// Load recent conversations and lessons from DB.
 		try {
 			const convs = await getRecentConversations();
 			setRecentConversations(convs);
+		} catch {}
+		try {
+			const lessons = await getLessons();
+			setLessons(mapLessons(lessons));
 		} catch {}
 
 		// Listen for store-update events from the Rust backend.
@@ -63,7 +70,41 @@
 				setRecentConversations(e.payload);
 			}),
 		);
+		unlisteners.push(
+			await listen<LessonResult[]>('lessons-updated', (e) => {
+				setLessons(mapLessons(e.payload));
+			}),
+		);
 	});
+
+	/** Convert backend LessonResult[] to store Lesson[] with computed status. */
+	function mapLessons(results: LessonResult[]): Lesson[] {
+		// Find the first non-completed lesson to mark as "current".
+		const firstActive = results.findIndex(
+			(l) => l.status === 'in_progress' || l.status === 'planned',
+		);
+		return results.map((l, i) => ({
+			id: l.id,
+			sequenceOrder: l.sequenceOrder,
+			title: l.title,
+			description: l.description,
+			topic: l.topic,
+			cefrLevel: l.cefrLevel,
+			successRate: l.successRate,
+			status:
+				l.status === 'completed'
+					? ('done' as const)
+					: i === firstActive
+						? ('current' as const)
+						: ('upcoming' as const),
+			progress:
+				l.status === 'completed'
+					? 'Done'
+					: l.status === 'in_progress'
+						? 'In progress'
+						: 'Upcoming',
+		}));
+	}
 
 	onDestroy(() => {
 		for (const un of unlisteners) un();

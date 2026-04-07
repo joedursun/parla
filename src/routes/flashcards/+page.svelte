@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { store, setFlashcards } from '$lib/stores.svelte';
-	import { getFlashcards } from '$lib/conversation';
+	import { getFlashcards, reviewFlashcard } from '$lib/conversation';
 	import { invoke } from '@tauri-apps/api/core';
 	import { onMount, onDestroy } from 'svelte';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -75,6 +75,7 @@
 		currentIndex = 0;
 		reviewedCount = 0;
 		flipped = false;
+		reviewStartTime = Date.now();
 		mode = 'review';
 	}
 
@@ -83,13 +84,27 @@
 		flipped = false;
 	}
 
-	function rateCard(_rating: string) {
-		// TODO: send rating to backend SRS engine
+	let reviewStartTime = $state(Date.now());
+
+	async function rateCard(rating: string) {
+		if (!current) return;
+		const responseTime = Date.now() - reviewStartTime;
+		try {
+			await reviewFlashcard(current.id, rating, responseTime);
+		} catch (e) {
+			console.error('Failed to review flashcard:', e);
+		}
 		reviewedCount++;
 		flipped = false;
+		reviewStartTime = Date.now();
 		if (currentIndex + 1 < dueCards.length) {
 			currentIndex++;
 		} else {
+			// Refresh flashcards list after completing review.
+			try {
+				const cards = await getFlashcards();
+				setFlashcards(cards);
+			} catch {}
 			mode = 'browse';
 		}
 	}

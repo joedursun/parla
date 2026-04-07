@@ -156,71 +156,55 @@ The voice loop is the core experience and the hardest integration work. Get this
 
 ---
 
-## Phase 4 — Onboarding and Lesson System
+## Phase 4 — Onboarding and Lesson System (partial ✓)
 
-### 4a: Onboarding flow
+### 4a: Onboarding flow ✓
 
-- Build the onboarding UI: language selection, self-assessment, goals
-- Create `learner_profile` on completion
-- Seed `grammar_concepts` for the selected language and level
-- Call LLM to generate initial learning path (see [data.md § Initial Setup](data.md#1-initial-setup-onboarding))
-- Store generated lessons in `lessons` table
+- ✓ Grammar concepts seeded for 9 languages × 4 CEFR levels (`db/grammar_seeds.rs`)
+- ✓ LLM generates 10-lesson learning path on profile creation (background task)
+- ✓ Lessons stored in DB, emitted to frontend via `lessons-updated` event
 
-### 4b: Lesson management
+### 4b: Lesson management (partial ✓)
 
-- Build the learning path UI showing lesson sequence with status
-- Implement lesson start flow:
-  - Query learner progress data from SQLite (the queries in [data.md § Lesson Plan Generation](data.md#2-lesson-plan-generation-before-each-lesson))
-  - Run adaptation check (proceed vs. review) via LLM
-  - Assemble the full conversation system prompt from DB data
-- Implement lesson completion:
-  - Post-conversation summarization via LLM
-  - Update lesson status, success rate
-  - Update grammar concept accuracy and status
-  - Recompute weak areas
-  - Update daily stats
-  - Trigger next lesson planning if needed
+- ✓ Learning path UI on dashboard with real DB data
+- ✓ Lesson start flow: marks in_progress, creates conversation, sets `LessonContext` system prompt
+- ✓ Daily stats updated on each conversation turn
+- Lesson completion flow (summarization, grammar updates, next lesson) — remaining
 
-### 4c: Free conversation mode
+### 4c: Free conversation mode ✓
 
-- Implement the free conversation system prompt variant (see [data.md § Free Conversation Mode](data.md#free-conversation-mode))
-- Same conversation pipeline but no lesson objectives
-- Still track vocabulary, corrections, and create flashcards from new words
+- ✓ Free conversation works end-to-end (from Phase 2)
+- Cross-session learner model assembly — remaining
 
 ### 4d: Learner model assembly
 
-- Build the cross-session learner model from SQL queries (see [data.md § Cross-Session Memory](data.md#c-cross-session-memory))
-- Include it in every conversation system prompt
-- Implement mid-conversation adaptation: inject `<system_update>` messages based on `estimated_comprehension` (see [data.md § Conversation-Level Adaptation](data.md#b-conversation-level-adaptation))
+- Cross-session learner model from SQL queries — remaining
+- Mid-conversation adaptation — remaining (can defer)
 
-**Exit criteria**: user can onboard, follow a generated lesson path, have lessons adapt to their progress, and hold free conversations — all via voice.
+**Exit criteria**: ✓ user can onboard, see generated lesson path, start lessons. Remaining: lesson completion, learner model.
 
 ---
 
-## Phase 5 — Flashcard Review System
+## Phase 5 — Flashcard Review System ✓
 
-### 5a: SRS engine
+### 5a: SRS engine ✓
 
-- Implement the FSRS/SM-2 algorithm in Rust (see [data.md § Flashcard Review Flow](data.md#5-flashcard-review-flow))
-- Rating → interval calculation (Again/Hard/Good/Easy)
-- Status transitions (new → learning → review → mature, with lapses)
-- Due card fetching query with priority ordering
+- ✓ SM-2 algorithm in Rust (`db.review_flashcard()`)
+- ✓ Rating → interval: Again (reset), Hard (×1.2), Good (×ease), Easy (×ease×1.3)
+- ✓ Status transitions: new → learning → review → mature, with lapses
+- ✓ Due card fetching with priority ordering, review log
 
-### 5b: Review UI
+### 5b: Review UI ✓
 
-- Flashcard review screen: show card front (target language), reveal back on tap
-- Audio playback of pronunciation
-- Rating buttons (Again / Hard / Good / Easy)
-- Session summary at end of review (cards reviewed, accuracy)
-- Voice mode: hear the word, speak the translation (or vice versa)
+- ✓ Review screen with flip animation, TTS, rating buttons, response time, keyboard shortcuts
 
-### 5c: Card browsing and management
+### 5c: Card browsing and management (partial)
 
-- Browse all cards with filtering (by topic, status, lesson)
-- Manual card creation
-- Card stats (review count, ease, next due date)
+- ✓ Browse all cards with status filtering
+- Manual card creation — remaining
+- Card stats — partially shown
 
-**Exit criteria**: vocabulary from conversations automatically becomes flashcards; user can review due cards with SRS scheduling; cards persist and schedule correctly across sessions.
+**Exit criteria**: ✓ vocabulary → flashcards → SRS review → persistence across sessions.
 
 ---
 
@@ -289,10 +273,8 @@ The voice loop is the core experience and the hardest integration work. Get this
 |-------|-------|------------|--------|
 | 1 | Audio pipeline (VAD → STT → TTS) | — | ✓ Done |
 | 2 | LLM integration + voice-to-voice | Phase 1 | ✓ Done |
-| 3 | SQLite + persistence + onboarding | Phase 2 | ✓ Done (summarization pending) |
-| 4 | Lessons + adaptation | Phase 3 | — |
-| 5 | Flashcard SRS | Phase 3 | — |
+| 3 | SQLite + persistence + onboarding | Phase 2 | ✓ Done |
+| 4 | Lessons + adaptation | Phase 3 | Partial ✓ (lesson start done, completion remaining) |
+| 5 | Flashcard SRS | Phase 3 | ✓ Done |
 | 6 | Progress tracking + dashboard | Phases 4, 5 | — |
 | 7 | Polish + optimization | All | — |
-
-Phases 4 and 5 can be worked in parallel once Phase 3 is complete.
