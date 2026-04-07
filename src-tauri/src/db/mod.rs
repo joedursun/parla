@@ -29,6 +29,21 @@ impl Db {
         conn.execute_batch(SCHEMA).map_err(|e| format!("migration failed: {e}"))
     }
 
+    /// Run a closure inside a SQLite transaction. Commits on success,
+    /// rolls back on error or panic (via `Transaction::drop`).
+    pub fn with_transaction<F, R>(&self, f: F) -> Result<R, String>
+    where
+        F: FnOnce(&Connection) -> Result<R, String>,
+    {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("begin transaction: {e}"))?;
+        let result = f(&tx)?;
+        tx.commit().map_err(|e| format!("commit: {e}"))?;
+        Ok(result)
+    }
+
     // ── Learner profile ──────────────────────────────────────────────────
 
     pub fn create_profile(&self, profile: &NewProfile) -> Result<(), String> {
@@ -72,18 +87,6 @@ impl Db {
 
     // ── Conversations ────────────────────────────────────────────────────
 
-    pub fn create_conversation(&self, mode: &str, topic: Option<&str>) -> Result<i64, String> {
-        let conn = self.conn.lock().unwrap();
-        let now = now_iso();
-        conn.execute(
-            "INSERT INTO conversations (mode, topic, started_at, created_at)
-             VALUES (?1, ?2, ?3, ?3)",
-            params![mode, topic, now],
-        )
-        .map_err(|e| format!("insert conversation: {e}"))?;
-        Ok(conn.last_insert_rowid())
-    }
-
     pub fn get_recent_conversations(&self, limit: usize) -> Result<Vec<ConversationRow>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
@@ -125,69 +128,32 @@ impl Db {
     /// Delete a conversation and its associated messages and corrections.
     /// Nulls out vocabulary references but keeps vocab/flashcard rows.
     pub fn delete_conversation(&self, conversation_id: i64) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        // Delete corrections (references both messages and conversations).
-        conn.execute(
-            "DELETE FROM corrections WHERE conversation_id = ?1",
-            params![conversation_id],
-        )
-        .map_err(|e| format!("delete corrections: {e}"))?;
-        // Delete messages.
-        conn.execute(
-            "DELETE FROM messages WHERE conversation_id = ?1",
-            params![conversation_id],
-        )
-        .map_err(|e| format!("delete messages: {e}"))?;
-        // Null out vocabulary back-references (vocab is shared, don't delete it).
-        conn.execute(
-            "UPDATE vocabulary SET first_seen_conversation_id = NULL WHERE first_seen_conversation_id = ?1",
-            params![conversation_id],
-        )
-        .map_err(|e| format!("null vocab refs: {e}"))?;
-        // Delete the conversation itself.
-        conn.execute(
-            "DELETE FROM conversations WHERE id = ?1",
-            params![conversation_id],
-        )
-        .map_err(|e| format!("delete conversation: {e}"))?;
-        Ok(())
-    }
-
-    pub fn update_conversation_counts(
-        &self,
-        conversation_id: i64,
-        message_count: i32,
-        error_count: i32,
-    ) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE conversations SET message_count = ?1, error_count = ?2 WHERE id = ?3",
-            params![message_count, error_count, conversation_id],
-        )
-        .map_err(|e| format!("update conversation: {e}"))?;
-        Ok(())
+        self.with_transaction(|tx| {
+            tx.execute(
+                "DELETE FROM corrections WHERE conversation_id = ?1",
+                params![conversation_id],
+            )
+            .map_err(|e| format!("delete corrections: {e}"))?;
+            tx.execute(
+                "DELETE FROM messages WHERE conversation_id = ?1",
+                params![conversation_id],
+            )
+            .map_err(|e| format!("delete messages: {e}"))?;
+            tx.execute(
+                "UPDATE vocabulary SET first_seen_conversation_id = NULL WHERE first_seen_conversation_id = ?1",
+                params![conversation_id],
+            )
+            .map_err(|e| format!("null vocab refs: {e}"))?;
+            tx.execute(
+                "DELETE FROM conversations WHERE id = ?1",
+                params![conversation_id],
+            )
+            .map_err(|e| format!("delete conversation: {e}"))?;
+            Ok(())
+        })
     }
 
     // ── Messages ─────────────────────────────────────────────────────────
-
-    pub fn insert_message(&self, msg: &NewMessage) -> Result<i64, String> {
-        let conn = self.conn.lock().unwrap();
-        let now = now_iso();
-        conn.execute(
-            "INSERT INTO messages (conversation_id, role, content, translation, input_method, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                msg.conversation_id,
-                msg.role,
-                msg.content,
-                msg.translation,
-                msg.input_method,
-                now,
-            ],
-        )
-        .map_err(|e| format!("insert message: {e}"))?;
-        Ok(conn.last_insert_rowid())
-    }
 
     /// Fetch all messages for a given conversation, ordered chronologically.
     pub fn get_messages_by_conversation(
@@ -219,84 +185,7 @@ impl Db {
         Ok(out)
     }
 
-    // ── Corrections ──────────────────────────────────────────────────────
-
-    pub fn insert_correction(&self, c: &NewCorrection) -> Result<i64, String> {
-        let conn = self.conn.lock().unwrap();
-        let now = now_iso();
-        conn.execute(
-            "INSERT INTO corrections (message_id, conversation_id, original_text, corrected_text, explanation, error_type, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                c.message_id,
-                c.conversation_id,
-                c.original_text,
-                c.corrected_text,
-                c.explanation,
-                c.error_type,
-                now,
-            ],
-        )
-        .map_err(|e| format!("insert correction: {e}"))?;
-        Ok(conn.last_insert_rowid())
-    }
-
-    // ── Vocabulary ───────────────────────────────────────────────────────
-
-    /// Upsert a vocabulary item. Returns the vocabulary row id.
-    pub fn upsert_vocabulary(&self, v: &NewVocabulary) -> Result<i64, String> {
-        let conn = self.conn.lock().unwrap();
-        let now = now_iso();
-        conn.execute(
-            "INSERT INTO vocabulary
-                (target_text, native_text, pronunciation, part_of_speech, topic,
-                 example_sentence_target, example_sentence_native,
-                 first_seen_conversation_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(target_text, topic) DO UPDATE SET
-                native_text = excluded.native_text,
-                pronunciation = COALESCE(excluded.pronunciation, vocabulary.pronunciation),
-                example_sentence_target = COALESCE(excluded.example_sentence_target, vocabulary.example_sentence_target),
-                example_sentence_native = COALESCE(excluded.example_sentence_native, vocabulary.example_sentence_native)",
-            params![
-                v.target_text,
-                v.native_text,
-                v.pronunciation,
-                v.part_of_speech,
-                v.topic,
-                v.example_target,
-                v.example_native,
-                v.conversation_id,
-                now,
-            ],
-        )
-        .map_err(|e| format!("upsert vocabulary: {e}"))?;
-
-        // Get the id of the inserted/updated row.
-        let id: i64 = conn
-            .query_row(
-                "SELECT id FROM vocabulary WHERE target_text = ?1 AND topic = ?2",
-                params![v.target_text, v.topic],
-                |row| row.get(0),
-            )
-            .map_err(|e| format!("get vocab id: {e}"))?;
-        Ok(id)
-    }
-
     // ── Flashcards ───────────────────────────────────────────────────────
-
-    /// Create a flashcard for a vocabulary item if one doesn't already exist.
-    pub fn ensure_flashcard(&self, vocabulary_id: i64) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        let now = now_iso();
-        conn.execute(
-            "INSERT OR IGNORE INTO flashcards (vocabulary_id, due_date, created_at)
-             VALUES (?1, ?2, ?2)",
-            params![vocabulary_id, now],
-        )
-        .map_err(|e| format!("insert flashcard: {e}"))?;
-        Ok(())
-    }
 
     pub fn flashcards_due_count(&self) -> Result<i64, String> {
         let conn = self.conn.lock().unwrap();
@@ -412,37 +301,6 @@ impl Db {
             .map_err(|e| format!("insert grammar concept: {e}"))?;
         }
         Ok(())
-    }
-
-    /// Fetch all grammar concepts, ordered by CEFR level then slug.
-    pub fn get_grammar_concepts(&self) -> Result<Vec<GrammarConceptRow>, String> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, slug, name, description, cefr_level, status, accuracy_rate, times_practiced
-                 FROM grammar_concepts
-                 ORDER BY cefr_level ASC, id ASC",
-            )
-            .map_err(|e| format!("prepare: {e}"))?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(GrammarConceptRow {
-                    id: row.get(0)?,
-                    slug: row.get(1)?,
-                    name: row.get(2)?,
-                    description: row.get(3)?,
-                    cefr_level: row.get(4)?,
-                    status: row.get(5)?,
-                    accuracy_rate: row.get(6)?,
-                    times_practiced: row.get(7)?,
-                })
-            })
-            .map_err(|e| format!("query: {e}"))?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r.map_err(|e| format!("row: {e}"))?);
-        }
-        Ok(out)
     }
 
     // ── Lessons ──────────────────────────────────────────────────────────
@@ -596,53 +454,6 @@ impl Db {
 
     // ── Flashcard review (SRS) ──────────────────────────────────────────
 
-    /// Fetch due flashcards for review, ordered by priority.
-    pub fn get_due_flashcards(&self, limit: usize) -> Result<Vec<DueFlashcardRow>, String> {
-        let conn = self.conn.lock().unwrap();
-        let now = now_iso();
-        let mut stmt = conn
-            .prepare(
-                "SELECT f.id, f.vocabulary_id, v.target_text, v.native_text,
-                        v.pronunciation, v.example_sentence_target, v.example_sentence_native,
-                        f.status, f.ease_factor, f.interval_days, f.review_count
-                 FROM flashcards f
-                 JOIN vocabulary v ON v.id = f.vocabulary_id
-                 WHERE f.due_date <= ?1
-                 ORDER BY
-                    CASE f.status
-                        WHEN 'learning' THEN 0
-                        WHEN 'new' THEN 1
-                        WHEN 'review' THEN 2
-                        ELSE 3
-                    END,
-                    f.due_date ASC
-                 LIMIT ?2",
-            )
-            .map_err(|e| format!("prepare: {e}"))?;
-        let rows = stmt
-            .query_map(params![now, limit], |row| {
-                Ok(DueFlashcardRow {
-                    id: row.get(0)?,
-                    vocabulary_id: row.get(1)?,
-                    target_text: row.get(2)?,
-                    native_text: row.get(3)?,
-                    pronunciation: row.get(4)?,
-                    example_target: row.get(5)?,
-                    example_native: row.get(6)?,
-                    status: row.get(7)?,
-                    ease_factor: row.get(8)?,
-                    interval_days: row.get(9)?,
-                    review_count: row.get(10)?,
-                })
-            })
-            .map_err(|e| format!("query: {e}"))?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r.map_err(|e| format!("row: {e}"))?);
-        }
-        Ok(out)
-    }
-
     /// Record a flashcard review and update SRS state (SM-2 algorithm).
     pub fn review_flashcard(
         &self,
@@ -724,58 +535,118 @@ impl Db {
         Ok(())
     }
 
-    // ── Daily stats ─────────────────────────────────────────────────────
+    /// Persist a complete conversation turn (student + tutor messages,
+    /// correction, vocabulary, flashcards, counts, daily stats) in a single
+    /// atomic transaction.
+    pub fn persist_turn(&self, input: &PersistTurnInput) -> Result<PersistTurnOutput, String> {
+        self.with_transaction(|tx| {
+            let now = now_iso();
+            let today = today_iso();
 
-    /// Upsert today's daily stats (increment counters).
-    pub fn update_daily_stats(
-        &self,
-        new_vocab: i32,
-        corrections: i32,
-        messages: i32,
-    ) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        let today = today_iso();
-        conn.execute(
-            "INSERT INTO daily_stats (date, new_vocab_count, corrections_count, messages_sent, conversations_count)
-             VALUES (?1, ?2, ?3, ?4, 1)
-             ON CONFLICT(date) DO UPDATE SET
-                new_vocab_count = daily_stats.new_vocab_count + excluded.new_vocab_count,
-                corrections_count = daily_stats.corrections_count + excluded.corrections_count,
-                messages_sent = daily_stats.messages_sent + excluded.messages_sent",
-            params![today, new_vocab, corrections, messages],
-        )
-        .map_err(|e| format!("update daily stats: {e}"))?;
-        Ok(())
-    }
-
-    /// Get the current streak (consecutive days with practice).
-    pub fn get_streak(&self) -> Result<i32, String> {
-        let conn = self.conn.lock().unwrap();
-        let today = today_iso();
-        // Check if there's activity today or yesterday to start counting.
-        let streak: i32 = conn
-            .query_row(
-                "WITH RECURSIVE streak(d, n) AS (
-                    SELECT ?1, 0
-                    UNION ALL
-                    SELECT date(d, '-1 day'), n + 1
-                    FROM streak
-                    WHERE EXISTS (
-                        SELECT 1 FROM daily_stats
-                        WHERE date = date(d, '-1 day')
-                        AND (practice_time_min > 0 OR messages_sent > 0)
+            // Create or reuse conversation.
+            let (conv_id, is_new) = match input.conversation_id {
+                Some(id) => (id, false),
+                None => {
+                    tx.execute(
+                        "INSERT INTO conversations (mode, topic, started_at, created_at)
+                         VALUES ('free', NULL, ?1, ?1)",
+                        params![now],
                     )
-                 )
-                 SELECT CASE
-                    WHEN EXISTS (SELECT 1 FROM daily_stats WHERE date = ?1 AND (practice_time_min > 0 OR messages_sent > 0))
-                    THEN (SELECT MAX(n) + 1 FROM streak)
-                    ELSE (SELECT MAX(n) FROM streak)
-                 END",
-                params![today],
-                |row| row.get(0),
+                    .map_err(|e| format!("insert conversation: {e}"))?;
+                    (tx.last_insert_rowid(), true)
+                }
+            };
+
+            // Insert student message.
+            tx.execute(
+                "INSERT INTO messages (conversation_id, role, content, translation, input_method, created_at)
+                 VALUES (?1, 'student', ?2, NULL, 'text', ?3)",
+                params![conv_id, input.student_text, now],
             )
-            .unwrap_or(0);
-        Ok(streak)
+            .map_err(|e| format!("insert student message: {e}"))?;
+            let student_msg_id = tx.last_insert_rowid();
+
+            // Insert tutor message.
+            tx.execute(
+                "INSERT INTO messages (conversation_id, role, content, translation, input_method, created_at)
+                 VALUES (?1, 'tutor', ?2, ?3, 'text', ?4)",
+                params![conv_id, input.tutor_target, input.tutor_native, now],
+            )
+            .map_err(|e| format!("insert tutor message: {e}"))?;
+
+            // Insert correction if present.
+            let correction_count = if let Some(c) = &input.correction {
+                tx.execute(
+                    "INSERT INTO corrections (message_id, conversation_id, original_text, corrected_text, explanation, error_type, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'grammar', ?6)",
+                    params![student_msg_id, conv_id, c.original, c.corrected, c.explanation, now],
+                )
+                .map_err(|e| format!("insert correction: {e}"))?;
+                1i32
+            } else {
+                0
+            };
+
+            // Upsert vocabulary + ensure flashcards.
+            for v in &input.vocabulary {
+                tx.execute(
+                    "INSERT INTO vocabulary
+                        (target_text, native_text, pronunciation, part_of_speech, topic,
+                         example_sentence_target, example_sentence_native,
+                         first_seen_conversation_id, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                     ON CONFLICT(target_text, topic) DO UPDATE SET
+                        native_text = excluded.native_text,
+                        pronunciation = COALESCE(excluded.pronunciation, vocabulary.pronunciation),
+                        example_sentence_target = COALESCE(excluded.example_sentence_target, vocabulary.example_sentence_target),
+                        example_sentence_native = COALESCE(excluded.example_sentence_native, vocabulary.example_sentence_native)",
+                    params![
+                        v.target_text, v.native_text, v.pronunciation, v.part_of_speech,
+                        v.topic, v.example_target, v.example_native, conv_id, now,
+                    ],
+                )
+                .map_err(|e| format!("upsert vocabulary: {e}"))?;
+
+                let vocab_id: i64 = tx
+                    .query_row(
+                        "SELECT id FROM vocabulary WHERE target_text = ?1 AND topic = ?2",
+                        params![v.target_text, v.topic],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| format!("get vocab id: {e}"))?;
+
+                tx.execute(
+                    "INSERT OR IGNORE INTO flashcards (vocabulary_id, due_date, created_at)
+                     VALUES (?1, ?2, ?2)",
+                    params![vocab_id, now],
+                )
+                .map_err(|e| format!("insert flashcard: {e}"))?;
+            }
+
+            // Update conversation counts.
+            tx.execute(
+                "UPDATE conversations SET message_count = ?1, error_count = ?2 WHERE id = ?3",
+                params![input.message_count, input.error_count, conv_id],
+            )
+            .map_err(|e| format!("update conversation: {e}"))?;
+
+            // Update daily stats.
+            tx.execute(
+                "INSERT INTO daily_stats (date, new_vocab_count, corrections_count, messages_sent, conversations_count)
+                 VALUES (?1, ?2, ?3, 1, 1)
+                 ON CONFLICT(date) DO UPDATE SET
+                    new_vocab_count = daily_stats.new_vocab_count + excluded.new_vocab_count,
+                    corrections_count = daily_stats.corrections_count + excluded.corrections_count,
+                    messages_sent = daily_stats.messages_sent + excluded.messages_sent",
+                params![today, input.vocabulary.len() as i32, correction_count],
+            )
+            .map_err(|e| format!("update daily stats: {e}"))?;
+
+            Ok(PersistTurnOutput {
+                conversation_id: conv_id,
+                is_new,
+            })
+        })
     }
 }
 
@@ -795,23 +666,6 @@ pub struct ProfileRow {
     pub goals_json: String,
 }
 
-pub struct NewMessage {
-    pub conversation_id: i64,
-    pub role: String,
-    pub content: String,
-    pub translation: Option<String>,
-    pub input_method: String,
-}
-
-pub struct NewCorrection {
-    pub message_id: i64,
-    pub conversation_id: i64,
-    pub original_text: String,
-    pub corrected_text: String,
-    pub explanation: String,
-    pub error_type: String,
-}
-
 pub struct NewVocabulary {
     pub target_text: String,
     pub native_text: String,
@@ -820,7 +674,6 @@ pub struct NewVocabulary {
     pub topic: String,
     pub example_target: Option<String>,
     pub example_native: Option<String>,
-    pub conversation_id: Option<i64>,
 }
 
 pub struct MessageRow {
@@ -875,17 +728,6 @@ pub struct NewGrammarConcept {
     pub cefr_level: String,
 }
 
-pub struct GrammarConceptRow {
-    pub id: i64,
-    pub slug: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub cefr_level: String,
-    pub status: String,
-    pub accuracy_rate: Option<f64>,
-    pub times_practiced: i32,
-}
-
 pub struct NewLesson {
     pub sequence_order: i32,
     pub cefr_level: String,
@@ -913,18 +755,26 @@ pub struct LessonRow {
     pub success_rate: Option<f64>,
 }
 
-pub struct DueFlashcardRow {
-    pub id: i64,
-    pub vocabulary_id: i64,
-    pub target_text: String,
-    pub native_text: String,
-    pub pronunciation: Option<String>,
-    pub example_target: Option<String>,
-    pub example_native: Option<String>,
-    pub status: String,
-    pub ease_factor: f64,
-    pub interval_days: f64,
-    pub review_count: i32,
+pub struct PersistTurnInput {
+    pub conversation_id: Option<i64>,
+    pub student_text: String,
+    pub tutor_target: String,
+    pub tutor_native: Option<String>,
+    pub correction: Option<CorrectionInput>,
+    pub vocabulary: Vec<NewVocabulary>,
+    pub message_count: i32,
+    pub error_count: i32,
+}
+
+pub struct CorrectionInput {
+    pub original: String,
+    pub corrected: String,
+    pub explanation: String,
+}
+
+pub struct PersistTurnOutput {
+    pub conversation_id: i64,
+    pub is_new: bool,
 }
 
 fn now_iso() -> String {

@@ -397,19 +397,7 @@ async fn rename_conversation(
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         db.update_conversation_topic(conversation_id, &title)?;
-        // Re-emit sidebar data.
-        if let Ok(convs) = db.get_recent_conversations(20) {
-            let list: Vec<serde_json::Value> = convs
-                .into_iter()
-                .map(|r| {
-                    let t = r
-                        .topic
-                        .unwrap_or_else(|| format!("{} conversation", r.mode));
-                    serde_json::json!({ "id": r.id.to_string(), "title": t })
-                })
-                .collect();
-            let _ = app.emit("recent-conversations", list);
-        }
+        emit_recent_conversations(&db, &app);
         Ok(())
     })
     .await
@@ -427,24 +415,10 @@ async fn delete_conversation(
     let history = history.inner().clone();
     tokio::task::spawn_blocking(move || {
         db.delete_conversation(conversation_id)?;
-        // If the deleted conversation is the active one, reset history.
         if history.get_conversation_id() == Some(conversation_id) {
             history.clear();
         }
-        // Re-emit sidebar data.
-        if let Ok(convs) = db.get_recent_conversations(20) {
-            let list: Vec<serde_json::Value> = convs
-                .into_iter()
-                .map(|r| {
-                    let t = r
-                        .topic
-                        .unwrap_or_else(|| format!("{} conversation", r.mode));
-                    serde_json::json!({ "id": r.id.to_string(), "title": t })
-                })
-                .collect();
-            let _ = app.emit("recent-conversations", list);
-        }
-        // Re-emit flashcard due count (deletions may affect it indirectly).
+        emit_recent_conversations(&db, &app);
         let due = db.flashcards_due_count().unwrap_or(0);
         let _ = app.emit("flashcards-due-count", due);
         Ok(())
@@ -724,11 +698,8 @@ async fn begin_tutor_lesson(
     // Update the target language for TTS.
     target_lang.set(language_name_to_code(&profile.target_language));
 
-    // Now run a normal conversation turn with a brief student opening.
-    // This message is shown in the chat so the flow feels natural.
     let student_text = "I'm ready for today's lesson.".to_string();
 
-    // -- Below is the same logic as conversation_turn --
     let cancel_flag = cancel.inner().0.clone();
     cancel_flag.store(false, Ordering::Relaxed);
 
@@ -741,57 +712,10 @@ async fn begin_tutor_lesson(
     let llm_for_db = llm.clone();
     let audio_handle = audio.inner().clone();
     let app_handle = app.clone();
-    let cancel_for_llm = cancel_flag.clone();
     let tts_lang = target_lang.get();
 
-    let result = tokio::task::spawn_blocking(move || -> Result<ConversationTurnResult, String> {
-        let chunk_rx = llm.generate(messages, cancel_for_llm.clone())?;
-        let mut parser = StreamingJsonParser::new();
-        let mut full_text = String::new();
-
-        let speak_sentences = |parser: &mut StreamingJsonParser| {
-            for sentence in parser.take_sentences() {
-                if cancel_for_llm.load(Ordering::Relaxed) { break; }
-                let lang = detect_language_from_text(&sentence).unwrap_or(&tts_lang);
-                if let Ok(output) = audio_handle.synthesize(&sentence, lang) {
-                    if !output.samples.is_empty() {
-                        let _ = audio_handle.play_audio(output.samples, output.sample_rate);
-                    }
-                }
-                let _ = app_handle.emit("tutor-sentence", &sentence);
-            }
-        };
-
-        loop {
-            let chunk = match chunk_rx.recv() { Ok(c) => c, Err(_) => break };
-            match chunk {
-                GenChunk::Text(t) => {
-                    full_text.push_str(&t);
-                    parser.push(&t);
-                    speak_sentences(&mut parser);
-                }
-                GenChunk::Done { full_text: ft } => { full_text = ft; break; }
-                GenChunk::Error(e) => return Err(e),
-            }
-        }
-        speak_sentences(&mut parser);
-
-        let parsed = ParsedTutorResponse::from_streamed(&full_text);
-        let (tutor_target, tutor_native, structured_err) = match &parsed {
-            Ok(p) => (p.tutor_message.target_lang.clone(), p.tutor_message.native_lang.clone(), None),
-            Err(e) => {
-                eprintln!("[llm] final JSON parse failed: {e}");
-                (parser.captured().to_string(), String::new(), Some(e.clone()))
-            }
-        };
-
-        Ok(ConversationTurnResult {
-            raw: full_text,
-            tutor_target,
-            tutor_native,
-            parsed: parsed.ok(),
-            parse_error: structured_err,
-        })
+    let result = tokio::task::spawn_blocking(move || {
+        run_streaming_turn(&llm, messages, cancel_flag, &audio_handle, &app_handle, &tts_lang)
     })
     .await
     .map_err(|e| format!("{e}"))??;
@@ -799,7 +723,6 @@ async fn begin_tutor_lesson(
     history.inner().push(ChatMessage::assistant(result.raw.clone()));
     let _ = app.emit("tutor-message-done", &result);
 
-    // Persist in background.
     if let Some(db) = app.try_state::<Db>() {
         let db = db.inner().clone();
         let history = history.inner().clone();
@@ -856,93 +779,17 @@ async fn conversation_turn(
     let llm_for_db = llm.clone();
     let audio_handle = audio.inner().clone();
     let app_handle = app.clone();
-    let cancel_for_llm = cancel_flag.clone();
     let tts_lang = target_lang.get();
 
-    // Do the heavy work on a blocking task so we don't hog the tokio runtime.
-    let result = tokio::task::spawn_blocking(move || -> Result<ConversationTurnResult, String> {
-        let chunk_rx = llm.generate(messages, cancel_for_llm.clone())?;
-
-        let mut parser = StreamingJsonParser::new();
-        let mut full_text = String::new();
-
-        // Speak + emit completed sentences as they form.
-        let speak_sentences = |parser: &mut StreamingJsonParser| {
-            for sentence in parser.take_sentences() {
-                if cancel_for_llm.load(Ordering::Relaxed) {
-                    break;
-                }
-                // Detect language from text script, fall back to the user's target language
-                let lang = detect_language_from_text(&sentence)
-                    .unwrap_or(&tts_lang);
-                if let Ok(output) = audio_handle.synthesize(&sentence, lang) {
-                    if !output.samples.is_empty() {
-                        let _ = audio_handle.play_audio(output.samples, output.sample_rate);
-                    }
-                }
-                let _ = app_handle.emit("tutor-sentence", &sentence);
-            }
-        };
-
-        // Pull chunks until Done or Error.
-        loop {
-            let chunk = match chunk_rx.recv() {
-                Ok(c) => c,
-                Err(_) => break,
-            };
-            match chunk {
-                GenChunk::Text(t) => {
-                    full_text.push_str(&t);
-                    parser.push(&t);
-                    speak_sentences(&mut parser);
-                }
-                GenChunk::Done { full_text: final_text } => {
-                    full_text = final_text;
-                    break;
-                }
-                GenChunk::Error(e) => {
-                    return Err(e);
-                }
-            }
-        }
-
-        // Flush any tail sentence after the stream ends.
-        speak_sentences(&mut parser);
-
-        // Final structured parse.
-        let parsed = ParsedTutorResponse::from_streamed(&full_text);
-        let (tutor_target, tutor_native, structured_err) = match &parsed {
-            Ok(p) => (
-                p.tutor_message.target_lang.clone(),
-                p.tutor_message.native_lang.clone(),
-                None,
-            ),
-            Err(e) => {
-                eprintln!("[llm] final JSON parse failed: {e}");
-                // Best effort: use whatever the streaming parser captured.
-                (parser.captured().to_string(), String::new(), Some(e.clone()))
-            }
-        };
-
-        Ok(ConversationTurnResult {
-            raw: full_text,
-            tutor_target,
-            tutor_native,
-            parsed: parsed.ok(),
-            parse_error: structured_err,
-        })
+    let result = tokio::task::spawn_blocking(move || {
+        run_streaming_turn(&llm, messages, cancel_flag, &audio_handle, &app_handle, &tts_lang)
     })
     .await
     .map_err(|e| format!("{e}"))??;
 
-    // Store the assistant turn in history (use the raw JSON so the next turn
-    // sees exactly what the model emitted).
     history.inner().push(ChatMessage::assistant(result.raw.clone()));
-
-    // Emit the final done event with the structured response.
     let _ = app.emit("tutor-message-done", &result);
 
-    // ── Persist to SQLite (non-blocking, after the voice loop) ───────
     if let Some(db) = app.try_state::<Db>() {
         let db = db.inner().clone();
         let history = history.inner().clone();
@@ -1093,6 +940,22 @@ fn generate_initial_lessons(
     Ok(())
 }
 
+/// Emit the recent conversations list to the frontend (sidebar).
+fn emit_recent_conversations(db: &Db, app: &tauri::AppHandle) {
+    if let Ok(convs) = db.get_recent_conversations(20) {
+        let list: Vec<serde_json::Value> = convs
+            .into_iter()
+            .map(|r| {
+                let title = r
+                    .topic
+                    .unwrap_or_else(|| format!("{} conversation", r.mode));
+                serde_json::json!({ "id": r.id.to_string(), "title": title })
+            })
+            .collect();
+        let _ = app.emit("recent-conversations", list);
+    }
+}
+
 /// Emit the current lesson list to the frontend.
 fn emit_lessons(db: &Db, app: &tauri::AppHandle) {
     if let Ok(lessons) = db.get_lessons() {
@@ -1115,9 +978,89 @@ fn emit_lessons(db: &Db, app: &tauri::AppHandle) {
     }
 }
 
-/// Persist one conversation turn (student + tutor messages, corrections,
-/// vocabulary, flashcards) to SQLite. Called in a background task so it
-/// never blocks the voice loop.
+/// Run the streaming LLM generation loop: feed chunks to the parser,
+/// synthesize and play sentences as they form, and return the final result.
+fn run_streaming_turn(
+    llm: &LlmState,
+    messages: Vec<ChatMessage>,
+    cancel: Arc<AtomicBool>,
+    audio: &AudioState,
+    app: &tauri::AppHandle,
+    tts_lang: &str,
+) -> Result<ConversationTurnResult, String> {
+    let chunk_rx = llm.generate(messages, cancel.clone())?;
+    let mut parser = StreamingJsonParser::new();
+    let mut full_text = String::new();
+
+    loop {
+        let chunk = match chunk_rx.recv() {
+            Ok(c) => c,
+            Err(_) => break,
+        };
+        match chunk {
+            GenChunk::Text(t) => {
+                full_text.push_str(&t);
+                parser.push(&t);
+                speak_parsed_sentences(&mut parser, &cancel, audio, app, tts_lang);
+            }
+            GenChunk::Done { full_text: ft } => {
+                full_text = ft;
+                break;
+            }
+            GenChunk::Error(e) => return Err(e),
+        }
+    }
+
+    // Flush any tail sentence after the stream ends.
+    speak_parsed_sentences(&mut parser, &cancel, audio, app, tts_lang);
+
+    // Final structured parse.
+    let parsed = ParsedTutorResponse::from_streamed(&full_text);
+    let (tutor_target, tutor_native, structured_err) = match &parsed {
+        Ok(p) => (
+            p.tutor_message.target_lang.clone(),
+            p.tutor_message.native_lang.clone(),
+            None,
+        ),
+        Err(e) => {
+            eprintln!("[llm] final JSON parse failed: {e}");
+            (parser.captured().to_string(), String::new(), Some(e.clone()))
+        }
+    };
+
+    Ok(ConversationTurnResult {
+        raw: full_text,
+        tutor_target,
+        tutor_native,
+        parsed: parsed.ok(),
+        parse_error: structured_err,
+    })
+}
+
+/// Speak and emit any complete sentences from the streaming parser.
+fn speak_parsed_sentences(
+    parser: &mut StreamingJsonParser,
+    cancel: &AtomicBool,
+    audio: &AudioState,
+    app: &tauri::AppHandle,
+    tts_lang: &str,
+) {
+    for sentence in parser.take_sentences() {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let lang = detect_language_from_text(&sentence).unwrap_or(tts_lang);
+        if let Ok(output) = audio.synthesize(&sentence, lang) {
+            if !output.samples.is_empty() {
+                let _ = audio.play_audio(output.samples, output.sample_rate);
+            }
+        }
+        let _ = app.emit("tutor-sentence", &sentence);
+    }
+}
+
+/// Persist one conversation turn to SQLite and emit frontend events.
+/// Called in a background task so it never blocks the voice loop.
 fn persist_turn(
     db: &Db,
     history: &ConversationHistory,
@@ -1126,75 +1069,67 @@ fn persist_turn(
     app: &tauri::AppHandle,
     llm: &LlmState,
 ) -> Result<(), String> {
-    // Ensure we have a conversation row.
-    let (conv_id, is_new) = match history.get_conversation_id() {
-        Some(id) => (id, false),
-        None => {
-            let id = db.create_conversation("free", None)?;
-            history.set_conversation_id(id);
-            (id, true)
-        }
-    };
+    // Build correction input.
+    let correction = result
+        .parsed
+        .as_ref()
+        .and_then(|p| p.correction.as_ref())
+        .map(|c| db::CorrectionInput {
+            original: c.original.clone(),
+            corrected: c.corrected.clone(),
+            explanation: c.explanation.clone(),
+        });
 
-    // Insert student message.
-    history.increment_messages();
-    let student_msg_id = db.insert_message(&db::NewMessage {
-        conversation_id: conv_id,
-        role: "student".into(),
-        content: student_text.to_string(),
-        translation: None,
-        input_method: "text".into(),
-    })?;
+    // Build vocabulary list.
+    let vocabulary: Vec<db::NewVocabulary> = result
+        .parsed
+        .as_ref()
+        .map(|p| {
+            p.new_vocabulary
+                .iter()
+                .map(|v| db::NewVocabulary {
+                    target_text: v.target_text.clone(),
+                    native_text: v.native_text.clone(),
+                    pronunciation: v.pronunciation.clone(),
+                    part_of_speech: v.part_of_speech.clone(),
+                    topic: "conversation".into(),
+                    example_target: v.example_target.clone(),
+                    example_native: v.example_native.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
-    // Insert tutor message.
-    history.increment_messages();
-    let tutor_msg_id = db.insert_message(&db::NewMessage {
-        conversation_id: conv_id,
-        role: "tutor".into(),
-        content: result.tutor_target.clone(),
-        translation: if result.tutor_native.is_empty() {
+    // Update in-memory counters.
+    history.increment_messages(); // student
+    history.increment_messages(); // tutor
+    if correction.is_some() {
+        history.increment_errors();
+    }
+    let (msg_count, err_count) = history.counts();
+
+    // Persist everything in a single transaction.
+    let output = db.persist_turn(&db::PersistTurnInput {
+        conversation_id: history.get_conversation_id(),
+        student_text: student_text.to_string(),
+        tutor_target: result.tutor_target.clone(),
+        tutor_native: if result.tutor_native.is_empty() {
             None
         } else {
             Some(result.tutor_native.clone())
         },
-        input_method: "text".into(),
+        correction,
+        vocabulary,
+        message_count: msg_count,
+        error_count: err_count,
     })?;
 
-    // Process parsed structured response.
-    if let Some(parsed) = &result.parsed {
-        // Correction
-        if let Some(correction) = &parsed.correction {
-            history.increment_errors();
-            db.insert_correction(&db::NewCorrection {
-                message_id: student_msg_id,
-                conversation_id: conv_id,
-                original_text: correction.original.clone(),
-                corrected_text: correction.corrected.clone(),
-                explanation: correction.explanation.clone(),
-                error_type: "grammar".into(),
-            })?;
-        }
+    if output.is_new {
+        history.set_conversation_id(output.conversation_id);
+    }
 
-        // Vocabulary + flashcards
-        for vocab in &parsed.new_vocabulary {
-            let vocab_id = db.upsert_vocabulary(&db::NewVocabulary {
-                target_text: vocab.target_text.clone(),
-                native_text: vocab.native_text.clone(),
-                pronunciation: vocab.pronunciation.clone(),
-                part_of_speech: vocab.part_of_speech.clone(),
-                topic: "conversation".into(),
-                example_target: vocab.example_target.clone(),
-                example_native: vocab.example_native.clone(),
-                conversation_id: Some(conv_id),
-            })?;
-            db.ensure_flashcard(vocab_id)?;
-        }
-
-        // Update conversation counts.
-        let (msg_count, err_count) = history.counts();
-        db.update_conversation_counts(conv_id, msg_count, err_count)?;
-
-        // Emit updated counts to the frontend.
+    // Emit frontend events (reads happen outside the transaction).
+    if result.parsed.is_some() {
         let due = db.flashcards_due_count().unwrap_or(0);
         let _ = app.emit("flashcards-due-count", due);
 
@@ -1219,7 +1154,8 @@ fn persist_turn(
     }
 
     // Generate a title for new conversations (first turn only).
-    if is_new {
+    if output.is_new {
+        let conv_id = output.conversation_id;
         let tutor_text = if result.tutor_native.is_empty() {
             &result.tutor_target
         } else {
@@ -1230,11 +1166,8 @@ fn persist_turn(
                 let _ = db.update_conversation_topic(conv_id, &title);
             }
             None => {
-                // Fallback: truncate student message.
                 let fallback = if student_text.len() > 40 {
-                    let end = student_text[..40]
-                        .rfind(' ')
-                        .unwrap_or(40);
+                    let end = student_text[..40].rfind(' ').unwrap_or(40);
                     format!("{}…", &student_text[..end])
                 } else {
                     student_text.to_string()
@@ -1244,27 +1177,7 @@ fn persist_turn(
         }
     }
 
-    // Emit updated recent conversations for the sidebar.
-    if let Ok(convs) = db.get_recent_conversations(20) {
-        let list: Vec<serde_json::Value> = convs
-            .into_iter()
-            .map(|r| {
-                let title = r
-                    .topic
-                    .unwrap_or_else(|| format!("{} conversation", r.mode));
-                serde_json::json!({ "id": r.id.to_string(), "title": title })
-            })
-            .collect();
-        let _ = app.emit("recent-conversations", list);
-    }
-
-    // Update daily stats.
-    let new_vocab = result.parsed.as_ref().map_or(0, |p| p.new_vocabulary.len() as i32);
-    let corrections = if result.parsed.as_ref().and_then(|p| p.correction.as_ref()).is_some() { 1 } else { 0 };
-    let _ = db.update_daily_stats(new_vocab, corrections, 1);
-
-    // Suppress unused variable warning for tutor_msg_id.
-    let _ = tutor_msg_id;
+    emit_recent_conversations(db, app);
 
     Ok(())
 }
@@ -1396,22 +1309,22 @@ struct ConversationTurnResult {
     parse_error: Option<String>,
 }
 
-#[derive(Clone)]
-struct ConversationHistory {
-    inner: Arc<Mutex<Vec<ChatMessage>>>,
-    system_prompt: Arc<Mutex<String>>,
+struct ConversationHistoryInner {
+    messages: Vec<ChatMessage>,
+    system_prompt: String,
     /// Current conversation's DB id (set on first turn, cleared on reset).
-    conversation_id: Arc<Mutex<Option<i64>>>,
+    conversation_id: Option<i64>,
     /// Running message count for the current conversation.
-    message_count: Arc<Mutex<i32>>,
+    message_count: i32,
     /// Running error count for the current conversation.
-    error_count: Arc<Mutex<i32>>,
+    error_count: i32,
 }
+
+#[derive(Clone)]
+struct ConversationHistory(Arc<Mutex<ConversationHistoryInner>>);
 
 impl ConversationHistory {
     fn new() -> Self {
-        // Default to a free conversation prompt until the DB layer provides
-        // real learner profile and lesson data.
         let default_prompt = build_system_prompt(
             "Spanish",
             "Learner",
@@ -1420,61 +1333,62 @@ impl ConversationHistory {
             &["Conversation"],
             None,
         );
-        Self {
-            inner: Arc::new(Mutex::new(Vec::new())),
-            system_prompt: Arc::new(Mutex::new(default_prompt)),
-            conversation_id: Arc::new(Mutex::new(None)),
-            message_count: Arc::new(Mutex::new(0)),
-            error_count: Arc::new(Mutex::new(0)),
-        }
+        Self(Arc::new(Mutex::new(ConversationHistoryInner {
+            messages: Vec::new(),
+            system_prompt: default_prompt,
+            conversation_id: None,
+            message_count: 0,
+            error_count: 0,
+        })))
     }
 
     fn set_system_prompt(&self, prompt: String) {
-        *self.system_prompt.lock().unwrap() = prompt;
+        self.0.lock().unwrap().system_prompt = prompt;
     }
 
     fn clear(&self) {
-        self.inner.lock().unwrap().clear();
-        *self.conversation_id.lock().unwrap() = None;
-        *self.message_count.lock().unwrap() = 0;
-        *self.error_count.lock().unwrap() = 0;
+        let mut inner = self.0.lock().unwrap();
+        inner.messages.clear();
+        inner.conversation_id = None;
+        inner.message_count = 0;
+        inner.error_count = 0;
     }
 
     fn push(&self, msg: ChatMessage) {
-        self.inner.lock().unwrap().push(msg);
+        self.0.lock().unwrap().messages.push(msg);
     }
 
     fn get_conversation_id(&self) -> Option<i64> {
-        *self.conversation_id.lock().unwrap()
+        self.0.lock().unwrap().conversation_id
     }
 
     fn set_conversation_id(&self, id: i64) {
-        *self.conversation_id.lock().unwrap() = Some(id);
+        self.0.lock().unwrap().conversation_id = Some(id);
     }
 
     fn increment_messages(&self) -> i32 {
-        let mut c = self.message_count.lock().unwrap();
-        *c += 1;
-        *c
+        let mut inner = self.0.lock().unwrap();
+        inner.message_count += 1;
+        inner.message_count
     }
 
     fn increment_errors(&self) -> i32 {
-        let mut c = self.error_count.lock().unwrap();
-        *c += 1;
-        *c
+        let mut inner = self.0.lock().unwrap();
+        inner.error_count += 1;
+        inner.error_count
     }
 
     fn counts(&self) -> (i32, i32) {
-        (*self.message_count.lock().unwrap(), *self.error_count.lock().unwrap())
+        let inner = self.0.lock().unwrap();
+        (inner.message_count, inner.error_count)
     }
 
     /// Return the full message list prefixed with the system prompt.
     fn messages_with_system(&self) -> Vec<ChatMessage> {
-        let hist = self.inner.lock().unwrap();
-        let prompt = self.system_prompt.lock().unwrap();
-        let mut out = Vec::with_capacity(hist.len() + 1);
-        out.push(ChatMessage::system(prompt.clone()));
-        out.extend(hist.iter().cloned());
+        let inner = self.0.lock().unwrap();
+        let mut out = Vec::with_capacity(inner.messages.len() + 1);
+        out.push(ChatMessage::system(inner.system_prompt.clone()));
+        out.extend(inner.messages.iter().cloned());
         out
     }
 }
