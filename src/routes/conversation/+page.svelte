@@ -11,6 +11,7 @@
 	} from '$lib/audio';
 	import {
 		conversationTurn,
+		beginTutorLesson,
 		resetConversation,
 		cancelGeneration,
 		loadConversation,
@@ -34,6 +35,7 @@
 	let processingAudio = $state(false);
 	let awaitingTutor = $state(false);
 	let textInput = $state('');
+	let isTutorLed = $state(false);
 
 	// Live conversation messages from actual voice interaction
 	let liveMessages: Message[] = $state([]);
@@ -191,6 +193,8 @@
 		grammarNotes = [];
 		suggestions = [];
 		streamingSentences = [];
+		isTutorLed = false;
+		autostartHandled = false;
 	}
 
 	function suggestionClick(s: SuggestedResponse) {
@@ -207,6 +211,7 @@
 
 	// ── Load conversation by ID from query param ───────────────────
 	let loadedConversationId: string | null = $state(null);
+	let autostartHandled = $state(false);
 
 	$effect(() => {
 		const id = page.url.searchParams.get('id');
@@ -231,6 +236,43 @@
 			}
 		}
 	});
+
+	// ── Tutor-led lesson autostart ──────────────────────────────────
+	$effect(() => {
+		const autostart = page.url.searchParams.get('autostart');
+		if (autostart === 'lesson' && !autostartHandled) {
+			autostartHandled = true;
+			startTutorLesson();
+		}
+	});
+
+	async function startTutorLesson() {
+		// Clear any existing conversation state.
+		liveMessages = [];
+		contextVocab = [];
+		grammarNotes = [];
+		suggestions = [];
+		streamingSentences = [];
+		store.currentLesson = null;
+		isTutorLed = true;
+
+		// Show the student's opening message and the tutor thinking state.
+		liveMessages = [{ role: 'student', target: "I'm ready for today's lesson.", translation: '' }];
+		awaitingTutor = true;
+
+		try {
+			// This calls the backend which sets the prompt, runs the LLM turn,
+			// and streams tutor-sentence + tutor-message-done events.
+			await beginTutorLesson();
+		} catch (e) {
+			console.error('Failed to start tutor lesson:', e);
+			liveMessages = [
+				...liveMessages,
+				{ role: 'tutor', target: `[Error: ${e}]`, translation: '' },
+			];
+			awaitingTutor = false;
+		}
+	}
 
 	let messagesEl: HTMLDivElement | undefined = $state();
 
@@ -264,6 +306,8 @@
 					<span class="dot"></span>
 					{#if currentLesson}
 						Active &middot; {currentLesson.title}
+					{:else if isTutorLed}
+						Guided Lesson
 					{:else}
 						Free Conversation
 					{/if}
@@ -292,6 +336,11 @@
 				<div class="empty-hint">
 					{#if llm?.loaded}
 						<p>Tap the mic or type to start a conversation with your {userProfile?.targetLanguage ?? 'language'} tutor.</p>
+						<p style="margin-top: var(--space-sm);">
+							<button class="btn btn-primary btn-sm" onclick={startTutorLesson}>
+								Or let your tutor lead a lesson
+							</button>
+						</p>
 					{:else}
 						<p>Loading language model… this can take a moment on first launch.</p>
 					{/if}

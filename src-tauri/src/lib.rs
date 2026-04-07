@@ -671,6 +671,156 @@ async fn reset_conversation(history: State<'_, ConversationHistory>) -> Result<(
     Ok(())
 }
 
+/// Begin a tutor-led lesson: the tutor chooses a topic and initiates.
+/// Resets conversation, sets a tutor-led system prompt, and auto-sends an
+/// opening so the tutor starts talking immediately.
+#[tauri::command]
+async fn begin_tutor_lesson(
+    app: tauri::AppHandle,
+    audio: State<'_, AudioState>,
+    llm: State<'_, LlmState>,
+    history: State<'_, ConversationHistory>,
+    cancel: State<'_, CancelFlag>,
+    target_lang: State<'_, TargetLanguage>,
+    db: State<'_, Db>,
+) -> Result<ConversationTurnResult, String> {
+    // Reset conversation state for a fresh lesson.
+    history.inner().clear();
+    store_clear_lesson_state(&app);
+
+    // Load profile to build the system prompt.
+    let db_inner = db.inner().clone();
+    let profile = tokio::task::spawn_blocking(move || db_inner.get_profile())
+        .await
+        .map_err(|e| format!("{e}"))??
+        .ok_or("no profile — complete onboarding first")?;
+
+    let goals: Vec<String> =
+        serde_json::from_str(&profile.goals_json).unwrap_or_default();
+    let goal_refs: Vec<&str> = goals.iter().map(|s| s.as_str()).collect();
+
+    // Build a tutor-led system prompt: same as free conversation, but with
+    // an instruction for the tutor to choose the topic and lead the lesson.
+    let mut prompt = build_system_prompt(
+        &profile.target_language,
+        "Learner",
+        &profile.native_language,
+        &profile.cefr_level,
+        &goal_refs,
+        None, // no specific lesson context — tutor picks the topic
+    );
+    // Override the closing instruction for tutor-led mode.
+    let free_closing = "Start by greeting the student warmly and asking what they'd like to talk about.";
+    let tutor_led_closing = "The student has just started a lesson. YOU choose the conversation topic — \
+        pick something interesting, practical, and relevant to their goals and level. \
+        Do NOT ask them what they want to talk about. Instead, greet them warmly, \
+        set the scene for a realistic conversation situation (e.g. ordering at a restaurant, \
+        asking for directions, meeting someone new), and begin the lesson immediately. \
+        Keep your opening to 2-3 sentences.";
+    prompt = prompt.replace(free_closing, tutor_led_closing);
+
+    history.inner().set_system_prompt(prompt);
+
+    // Update the target language for TTS.
+    target_lang.set(language_name_to_code(&profile.target_language));
+
+    // Now run a normal conversation turn with a brief student opening.
+    // This message is shown in the chat so the flow feels natural.
+    let student_text = "I'm ready for today's lesson.".to_string();
+
+    // -- Below is the same logic as conversation_turn --
+    let cancel_flag = cancel.inner().0.clone();
+    cancel_flag.store(false, Ordering::Relaxed);
+
+    let user_msg = ChatMessage::user(student_text.clone());
+    let mut messages = history.inner().messages_with_system();
+    messages.push(user_msg.clone());
+    history.inner().push(user_msg);
+
+    let llm = llm.inner().clone();
+    let llm_for_db = llm.clone();
+    let audio_handle = audio.inner().clone();
+    let app_handle = app.clone();
+    let cancel_for_llm = cancel_flag.clone();
+    let tts_lang = target_lang.get();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<ConversationTurnResult, String> {
+        let chunk_rx = llm.generate(messages, cancel_for_llm.clone())?;
+        let mut parser = StreamingJsonParser::new();
+        let mut full_text = String::new();
+
+        let speak_sentences = |parser: &mut StreamingJsonParser| {
+            for sentence in parser.take_sentences() {
+                if cancel_for_llm.load(Ordering::Relaxed) { break; }
+                let lang = detect_language_from_text(&sentence).unwrap_or(&tts_lang);
+                if let Ok(output) = audio_handle.synthesize(&sentence, lang) {
+                    if !output.samples.is_empty() {
+                        let _ = audio_handle.play_audio(output.samples, output.sample_rate);
+                    }
+                }
+                let _ = app_handle.emit("tutor-sentence", &sentence);
+            }
+        };
+
+        loop {
+            let chunk = match chunk_rx.recv() { Ok(c) => c, Err(_) => break };
+            match chunk {
+                GenChunk::Text(t) => {
+                    full_text.push_str(&t);
+                    parser.push(&t);
+                    speak_sentences(&mut parser);
+                }
+                GenChunk::Done { full_text: ft } => { full_text = ft; break; }
+                GenChunk::Error(e) => return Err(e),
+            }
+        }
+        speak_sentences(&mut parser);
+
+        let parsed = ParsedTutorResponse::from_streamed(&full_text);
+        let (tutor_target, tutor_native, structured_err) = match &parsed {
+            Ok(p) => (p.tutor_message.target_lang.clone(), p.tutor_message.native_lang.clone(), None),
+            Err(e) => {
+                eprintln!("[llm] final JSON parse failed: {e}");
+                (parser.captured().to_string(), String::new(), Some(e.clone()))
+            }
+        };
+
+        Ok(ConversationTurnResult {
+            raw: full_text,
+            tutor_target,
+            tutor_native,
+            parsed: parsed.ok(),
+            parse_error: structured_err,
+        })
+    })
+    .await
+    .map_err(|e| format!("{e}"))??;
+
+    history.inner().push(ChatMessage::assistant(result.raw.clone()));
+    let _ = app.emit("tutor-message-done", &result);
+
+    // Persist in background.
+    if let Some(db) = app.try_state::<Db>() {
+        let db = db.inner().clone();
+        let history = history.inner().clone();
+        let student_text_for_db = student_text.clone();
+        let result_for_db = result.clone();
+        let app_for_db = app.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = persist_turn(&db, &history, &student_text_for_db, &result_for_db, &app_for_db, &llm_for_db) {
+                eprintln!("[db] persist_turn failed: {e}");
+            }
+        });
+    }
+
+    Ok(result)
+}
+
+/// Emit store-clear event for lesson state (used when starting fresh).
+fn store_clear_lesson_state(app: &tauri::AppHandle) {
+    let _ = app.emit("lesson-cleared", ());
+}
+
 /// Run one conversation turn: student text in → streamed tutor response out.
 /// Synthesizes
 /// complete sentences to TTS as they form, and emits a final
@@ -1476,6 +1626,7 @@ pub fn run() {
             start_lesson,
             review_flashcard,
             load_conversation,
+            begin_tutor_lesson,
             conversation_turn,
             reset_conversation,
             cancel_generation,

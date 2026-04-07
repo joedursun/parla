@@ -149,6 +149,13 @@ export async function loadConversation(conversationId: number): Promise<LoadedMe
 	return invoke('load_conversation', { conversationId });
 }
 
+/** Begin a tutor-led lesson. The tutor chooses a topic and starts teaching.
+ *  Resets conversation, sets a tutor-led prompt, and auto-sends an opening.
+ *  Streams tutor response via the usual `tutor-sentence` / `tutor-message-done` events. */
+export async function beginTutorLesson(): Promise<ConversationTurnResult> {
+	return invoke('begin_tutor_lesson');
+}
+
 /** Clear the in-memory conversation history (start a fresh session). */
 export async function resetConversation(): Promise<void> {
 	await invoke('reset_conversation');

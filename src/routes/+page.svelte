@@ -72,11 +72,11 @@
 				<div class="action-meta">Practice speaking about anything</div>
 			</div>
 		</a>
-		<a class="action-card" href="/conversation">
-			<div class="action-icon listen">&#x1F3A7;</div>
+		<a class="action-card" href="/conversation?autostart=lesson">
+			<div class="action-icon lesson">&#x1F9D1;&#x200D;&#x1F3EB;</div>
 			<div>
-				<div class="action-title">Listening Practice</div>
-				<div class="action-meta">Train your ear with audio exercises</div>
+				<div class="action-title">Start Lesson</div>
+				<div class="action-meta">Your tutor picks a topic and leads</div>
 			</div>
 		</a>
 	</div>
@@ -208,7 +208,7 @@
 	.action-card.primary-action .action-icon { background: rgba(255,255,255,0.2); }
 	.action-icon.chat { background: var(--primary-subtle); }
 	.action-icon.cards { background: var(--secondary-subtle); }
-	.action-icon.listen { background: var(--accent-gold-subtle); }
+	.action-icon.lesson { background: var(--accent-gold-subtle); }
 	.action-title { font-weight: 650; font-size: 1rem; margin-bottom: 4px; }
 	.action-meta { font-size: 0.8125rem; color: var(--text-secondary); }
 
